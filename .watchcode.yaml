@@ -13,7 +13,8 @@ tasks:
     fileset: default
     commands:
       #- "nim -r c ./tests/test_basic_1.nim"
-      - "nim -r c ./tests/test_inheritance_chain.nim"
+      #- "nim -r c ./tests/test_inheritance_chain.nim"
+      - "nim -r c ./tests/test_overload.nim"
 
 default_task: default
 log: true

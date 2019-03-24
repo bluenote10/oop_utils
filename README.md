@@ -1,0 +1,3 @@
+# closure_methods
+
+Nim OOP experiment, WIP...

@@ -1,8 +1,9 @@
 import closure_methods
 
 class(Base):
-  #constructor(newBase) =
-  #  proc(xInit: int = 10)
+  # upcoming ctor syntax to make naming ctor optional
+  # constructor(newBase) =
+  #   proc(xInit: int = 10)
 
   constructor:
     proc newBase*(xInit: int = 10)
@@ -18,5 +19,5 @@ class(Base):
 
 block:
   let b = newBase()
-  echo b.getState()
-  echo b.getState()
+  doAssert b.getState() == 11
+  doAssert b.getState() == 12

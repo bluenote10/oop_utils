@@ -1,7 +1,7 @@
 import macros
 import strformat
 import options
-
+import sets
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -46,7 +46,35 @@ proc `genericParams=`(n: NimNode, other: NimNode) =
   n[2] = other
 
 # -----------------------------------------------------------------------------
-# Class parsing
+# Base type inspection
+# -----------------------------------------------------------------------------
+
+proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[string]) =
+  ## Recursively traverses over base types and collects their method fields.
+  ## TODO: collect 'abstract' custom annotation field information.
+
+  let baseTypeDef = baseSymbol.getImpl
+  let baseObjectTy = baseTypeDef[2][0]
+  # echo baseTypeDef.treeRepr
+
+  # inheritance is at ObjectTy index 1 -- recurse over parents
+  if baseObjectTy.len >= 1 and baseObjectTy[1].kind == nnkOfInherit:
+    let baseBaseSymbol = baseObjectTy[1][0]
+    extractBaseMethods(baseBaseSymbol, baseMethods)
+
+  # reclist is at ObjectTy index 2
+  let baseRecList = if baseObjectTy.len >= 3: baseObjectTy[2] else: newEmptyNode()
+  for identDef in baseRecList:
+    if identDef.kind == nnkIdentDefs:
+      let nameNode = identDef[0]
+      let typeNode = identDef[1]
+      if nameNode.kind == nnkPostfix and nameNode.len == 2: # because of export * symbol
+        baseMethods.add(nameNode[1].strVal)
+    else:
+      error &"Expected nnkIdentDefs, got {identDef.repr}"
+
+# -----------------------------------------------------------------------------
+# Class name parsing (mainly needed to split generic params)
 # -----------------------------------------------------------------------------
 
 type
@@ -99,6 +127,49 @@ proc findBlock(n: NimNode, name: string): NimNode =
     error &"There are {found.len} sections of type '{name}'; only one section allowed."
   return found[0][1]
 
+# -----------------------------------------------------------------------------
+# Constructor parsing
+# -----------------------------------------------------------------------------
+
+type
+  ParsedConstructor = ref object
+    name: Option[string]
+    args: seq[NimNode]
+
+proc isConstructor(n: NimNode): bool =
+  n.kind == nnkAsgn and (
+    (n[0].kind == nnkIdent and n[0].strVal == "constructor") or
+    (n[0].kind == nnkCall and n[0][0].kind == nnkIdent and n[0][0].strVal == "constructor")
+  )
+
+proc parseConstructor(n: NimNode): ParsedConstructor =
+  let name =
+    if n.kind == nnkCall:
+      some(n[1].strVal)
+    else:
+      none(string)
+  var args = newSeq[NimNode]()
+  let formalParams = n[1][0]
+  for i in 1 ..< formalParams.len:
+    args.add(formalParams[i])
+  ParsedConstructor(name: name, args: args)
+
+# -----------------------------------------------------------------------------
+# Base call parsing
+# -----------------------------------------------------------------------------
+
+type
+  ParsedBaseCall = ref object
+    args: seq[NimNode]
+
+proc isBaseCall(n: NimNode): bool =
+  n.kind == nnkCall and n[0].strVal == "base"
+
+proc parseBaseCall(n: NimNode): ParsedBaseCall =
+  var args = newSeq[NimNode]()
+  for i in 1 ..< n.len:
+    args.add(n[i])
+  ParsedBaseCall(args: args)
 
 # -----------------------------------------------------------------------------
 # Proc parsing
@@ -150,72 +221,6 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
       procDef: procDef.copyNimTree(),
     )
 
-
-proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[string]) =
-  let baseTypeDef = baseSymbol.getImpl
-  let baseObjectTy = baseTypeDef[2][0]
-  # echo baseTypeDef.treeRepr
-
-  # inheritance is at ObjectTy index 1 -- recurse over parents
-  if baseObjectTy.len >= 1 and baseObjectTy[1].kind == nnkOfInherit:
-    let baseBaseSymbol = baseObjectTy[1][0]
-    extractBaseMethods(baseBaseSymbol, baseMethods)
-
-  # reclist is at ObjectTy index 2
-  let baseRecList = if baseObjectTy.len >= 3: baseObjectTy[2] else: newEmptyNode()
-  for identDef in baseRecList:
-    if identDef.kind == nnkIdentDefs:
-      let nameNode = identDef[0]
-      let typeNode = identDef[1]
-      if nameNode.kind == nnkPostfix and nameNode.len == 2: # because of export * symbol
-        baseMethods.add(nameNode[1].strVal)
-    else:
-      error &"Expected nnkIdentDefs, got {identDef.repr}"
-
-# -----------------------------------------------------------------------------
-# Constructor parsing
-# -----------------------------------------------------------------------------
-
-type
-  ParsedConstructor = ref object
-    name: Option[string]
-    args: seq[NimNode]
-
-proc isConstructor(n: NimNode): bool =
-  n.kind == nnkAsgn and (
-    (n[0].kind == nnkIdent and n[0].strVal == "constructor") or
-    (n[0].kind == nnkCall and n[0][0].kind == nnkIdent and n[0][0].strVal == "constructor")
-  )
-
-proc parseConstructor(n: NimNode): ParsedConstructor =
-  let name =
-    if n.kind == nnkCall:
-      some(n[1].strVal)
-    else:
-      none(string)
-  var args = newSeq[NimNode]()
-  let formalParams = n[1][0]
-  for i in 1 ..< formalParams.len:
-    args.add(formalParams[i])
-  ParsedConstructor(name: name, args: args)
-
-# -----------------------------------------------------------------------------
-# Base call parsing
-# -----------------------------------------------------------------------------
-
-type
-  ParsedBaseCall = ref object
-    args: seq[NimNode]
-
-proc isBaseCall(n: NimNode): bool =
-  n.kind == nnkCall and n[0].strVal == "base"
-
-proc parseBaseCall(n: NimNode): ParsedBaseCall =
-  var args = newSeq[NimNode]()
-  for i in 1 ..< n.len:
-    args.add(n[i])
-  ParsedBaseCall(args: args)
-
 # -----------------------------------------------------------------------------
 # Body parsing
 # -----------------------------------------------------------------------------
@@ -252,10 +257,54 @@ proc parseBody(body: NimNode): ParsedBody =
       else:
         error "Class definition must have only one base call"
 
-
 # -----------------------------------------------------------------------------
 # Assembly of output procs
 # -----------------------------------------------------------------------------
+
+type
+  OverloadInfo = ref object
+    isFullyOverloaded: bool
+    newProcs: seq[ExportedProc]
+    overloadedProcs: seq[ExportedProc]
+
+proc compareProcs(baseProcs: seq[string], exportedProcs: seq[ExportedProc]): OverloadInfo =
+  result = OverloadInfo()
+  let baseProcsSet = baseProcs.toSet()
+  for exportedProc in exportedProcs:
+    if baseProcsSet.contains(exportedProc.name):
+      result.overloadedProcs.add(exportedProc)
+    else:
+      result.newProcs.add(exportedProc)
+
+proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, newProcs: seq[ExportedProc]): NimNode =
+  # create type fields from exported methods
+  let fields =
+    if newProcs.len == 0:
+      newEmptyNode()
+    else:
+      let reclist = newNimNode(nnkRecList)
+      for exportedProc in newProcs:
+        reclist.add(exportedProc.fieldDef)
+      reclist
+
+  # build type section
+  let typeSection = newNimNode(nnkTypeSection)
+  let typeDef = newNimNode(nnkTypeDef).add(
+    classDef.identClass,
+    classDef.genericParams,
+    newNimNode(nnkRefTy).add(
+      newNimNode(nnkObjectTy).add(
+        newEmptyNode(),
+        newNimNode(nnkOfInherit).add(
+          baseSymbol
+        ),
+        fields,
+      )
+    )
+  )
+  typeSection.add(typeDef)
+  return typeSection
+
 
 proc newLambda(): NimNode =
   newNimNode(nnkLambda).add(
@@ -351,7 +400,6 @@ proc assemblePatchProc(constructorDef: NimNode, classDef: ClassDef, baseSymbol: 
   # echo "patchProc:\n", result.treeRepr
 
 
-
 proc assembleNamedConstructor(constructorDef: NimNode, classDef: ClassDef, parsedBody: ParsedBody): NimNode =
   expectKind constructorDef, nnkProcDef
   result = constructorDef.copyNimTree()
@@ -416,33 +464,7 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   # recursive extraction of all base methods
   var baseMethods = newSeq[string]()
   extractBaseMethods(baseSymbol, baseMethods)
-
-  # create type fields from exported methods
-  let fields =
-    if parsedBody.exportedProcs.len == 0:
-      newEmptyNode()
-    else:
-      let reclist = newNimNode(nnkRecList)
-      for exportedProc in parsedBody.exportedProcs:
-        reclist.add(exportedProc.fieldDef)
-      reclist
-
-  # build type section
-  let typeSection = newNimNode(nnkTypeSection)
-  let typeDef = newNimNode(nnkTypeDef).add(
-    classDef.identClass,
-    classDef.genericParams,
-    newNimNode(nnkRefTy).add(
-      newNimNode(nnkObjectTy).add(
-        newEmptyNode(),
-        newNimNode(nnkOfInherit).add(
-          baseSymbol
-        ),
-        fields,
-      )
-    )
-  )
-  typeSection.add(typeDef)
+  let overloadInfo = compareProcs(baseMethods, parsedBody.exportedProcs)
 
   let constructorDef = constructorBlock[0]  # TODO: find ProcDef, check only 1
   # We inject the return type to the ctor proc as a convenience.
@@ -454,6 +476,7 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   if constructorDef[3][0].kind == nnkEmpty:
     constructorDef[3][0] = classDef.rawClassDef
 
+  let typeSection = assembleTypeSection(classDef, baseSymbol, overloadInfo.newProcs)
   let namedConstructorProc = assembleNamedConstructor(constructorDef, classDef, parsedBody)
   let patchProc = assemblePatchProc(constructorDef, classDef, baseSymbol, parsedBody)
 
