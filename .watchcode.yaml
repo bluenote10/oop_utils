@@ -16,6 +16,11 @@ tasks:
       #- "nim -r c ./tests/test_inheritance_chain.nim"
       #- "nim -r c ./tests/test_overload.nim"
 
+      #- "nim -r js ./benchmarks/basic_dispatch_methods.nim"
+      #- "nim -r js ./benchmarks/basic_dispatch_closures.nim"
+      #- "nim -r c ./benchmarks/basic_dispatch_methods.nim"
+      #- "nim -r c ./benchmarks/basic_dispatch_closures.nim"
+
 default_task: default
 log: true
 sound: true
