@@ -1,0 +1,20 @@
+filesets:
+  default:
+    include:
+      - ".watchcode.yaml"
+      - "*.nim"
+    exclude:
+      - ".watchcode.log"
+    exclude_gitignore: false
+    match_mode: "gitlike"
+
+tasks:
+  default:
+    fileset: default
+    commands:
+      - "nim -r c ./tests/test_inheritance_chain.nim"
+
+default_task: default
+log: true
+sound: true
+notifications: true
