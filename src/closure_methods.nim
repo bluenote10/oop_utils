@@ -169,7 +169,6 @@ proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[string]) =
       let typeNode = identDef[1]
       if nameNode.kind == nnkPostfix and nameNode.len == 2: # because of export * symbol
         baseMethods.add(nameNode[1].strVal)
-        echo nameNode[1].strVal
     else:
       error &"Expected nnkIdentDefs, got {identDef.repr}"
 
@@ -273,7 +272,7 @@ proc convertProcDefIntoLambda(n: NimNode): NimNode =
   result = newLambda()
   result[3] = n[3]
   result[result.len - 1] = n[n.len - 1]
-  echo result.treeRepr
+  # echo result.treeRepr
 
 proc assemblePatchProc(constructorDef: NimNode, classDef: ClassDef, baseSymbol: NimNode, parsedBody: ParsedBody): NimNode =
   expectKind constructorDef, nnkProcDef
@@ -293,19 +292,20 @@ proc assemblePatchProc(constructorDef: NimNode, classDef: ClassDef, baseSymbol: 
     newEmptyNode(),
   )
 
-  # TODO needs to be made generic by copying generic params from constructor def
+  # main proc def
   result = newProc(
     ident "patch",
     [returnType, newIdentDefs(ident "self", classDef.rawClassDef)],
   )
+
+  # attach generic params
   result.genericParams = newNimNode(nnkGenericParams)
   for genericParam in classDef.genericParams:
     result.genericParams.add(genericParam)
 
+  # build closure body
   let closure = newLambda()
   closure[3] = ctorFormalParams
-
-  # build closure body
 
   # 1. parent constructor impl call
   for baseCall in parsedBody.baseCall:
@@ -348,7 +348,7 @@ proc assemblePatchProc(constructorDef: NimNode, classDef: ClassDef, baseSymbol: 
 
   # attach proc body
   result.procBody = procBody
-  echo "patchProc:\n", result.treeRepr
+  # echo "patchProc:\n", result.treeRepr
 
 
 
@@ -395,11 +395,6 @@ proc assembleNamedConstructor(constructorDef: NimNode, classDef: ClassDef, parse
 
 proc classImpl(definition, base, body: NimNode): NimNode =
 
-  # echo getType(base).treerepr
-  # echo getTypeInst(base).treerepr
-  # echo getTypeImpl(base).treerepr
-  # echo base.getTypeInst[1].symbol.getImpl.treeRepr
-
   result = newStmtList()
   echo "-----------------------------------------------------------------------"
   echo definition.treeRepr
@@ -414,6 +409,8 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   let constructorBlock = findBlock(body, "constructor")
 
   # get base TypeDef
+  expectKind base.getTypeInst, nnkBracketExpr
+  expectLen base.getTypeInst, 2
   let baseSymbol = base.getTypeInst[1]  # because its a typedesc, the type symbol is child 1
 
   # recursive extraction of all base methods
@@ -457,44 +454,6 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   if constructorDef[3][0].kind == nnkEmpty:
     constructorDef[3][0] = classDef.rawClassDef
 
-  #[
-  # Assemble class body
-  let procBody = newStmtList()
-  for baseBlock in baseBlockOpt:
-    let baseValue = baseBlock[0]
-    procBody.add(newNimNode(nnkLetSection).add(
-      newIdentDefs(ident "base", newEmptyNode(), baseValue)
-    ))
-  for statement in varsBlock:
-    procBody.add(statement)
-  for statement in procsBlockTransformed:
-    procBody.add(statement)
-
-  # Add final object constructor as return value of procBody
-  let returnValue = newNimNode(nnkObjConstr)
-  returnValue.add(classDef.rawClassDef)    # the return type -- we again need the BracketExpr for generics
-  for exportedMethod in exportedMethods:
-    let exportedMethodIdent = exportedMethod[0][1]
-    # add the `method: method` expression
-    returnValue.add(newNimNode(nnkExprColonExpr).add(
-      exportedMethodIdent,
-      exportedMethodIdent
-    ))
-  for baseMethod in baseMethods:
-    let exportedMethodIdent = ident(baseMethod)
-    let exportedMethodValue = newDotExpr(ident "base", ident(baseMethod))
-    # add the `method: method` expression
-    returnValue.add(newNimNode(nnkExprColonExpr).add(
-      exportedMethodIdent,
-      exportedMethodValue
-    ))
-
-  procBody.add(returnValue)
-
-  # Add the class body
-  constructorDef[constructorDef.len - 1] = procBody
-  ]#
-
   let namedConstructorProc = assembleNamedConstructor(constructorDef, classDef, parsedBody)
   let patchProc = assemblePatchProc(constructorDef, classDef, baseSymbol, parsedBody)
 
@@ -506,17 +465,22 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   #echo result.treeRepr
 
 
-#[
+# -----------------------------------------------------------------------------
+# Public macros
+# -----------------------------------------------------------------------------
+
 macro class*(definition: untyped, body: untyped): untyped =
-  let base = newEmptyNode()
-  result = classImpl(definition, base, body)
-]#
-
-macro class*(definition: untyped, base: typed, body: untyped): untyped =
-  #echo "1: ", base.getTypeInst.treeRepr
-  #echo "2: ", base.getTypeInst[1].symbol.getImpl.treeRepr
+  ## Class definition that derives from RootObj.
+  let base = getType(typedesc[RootObj])
   result = classImpl(definition, base, body)
 
+macro classOf*(definition: untyped, base: typed, body: untyped): untyped =
+  ## Class defintio that allows to specify a base class.
+  result = classImpl(definition, base, body)
+
+# -----------------------------------------------------------------------------
+# Dev sandbox
+# -----------------------------------------------------------------------------
 
 when false:
   # for quick tree dumps

@@ -1,45 +1,37 @@
 import closure_methods
 
-class(A, RootObj):
+class(A):
   constructor:
     proc newA*()
 
-  var x = "a"
+  proc a*(): string = "a"
 
-  proc a*() =
-    echo x
-
-class(AB, A):
+classOf(AB, A):
   constructor:
     proc newAB*()
 
   base()
 
-  var x = "b"
+  proc b*(): string = "b"
 
-  proc b*() =
-    echo x
-
-class(ABC, AB):
+classOf(ABC, AB):
   constructor:
     proc newABC*()
 
   base()
 
-  var x = "c"
+  proc c*(): string = "c"
 
-  proc c*() =
-    echo x
 
 block:
   let a = newA()
-  a.a()
+  doAssert a.a() == "a"
 
   let ab = newAB()
-  ab.a()
-  ab.b()
+  doAssert ab.a() == "a"
+  doAssert ab.b() == "b"
 
   let abc = newABC()
-  abc.a()
-  abc.b()
-  abc.c()
+  doAssert abc.a() == "a"
+  doAssert abc.b() == "b"
+  doAssert abc.c() == "c"

@@ -12,6 +12,7 @@ tasks:
   default:
     fileset: default
     commands:
+      #- "nim -r c ./tests/test_basic_1.nim"
       - "nim -r c ./tests/test_inheritance_chain.nim"
 
 default_task: default
