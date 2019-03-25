@@ -325,7 +325,7 @@ proc convertProcDefIntoLambda(n: NimNode): NimNode =
   result[result.len - 1] = n[n.len - 1]
   # echo result.treeRepr
 
-proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNode, parsedBody: ParsedBody): NimNode =
+proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNode, baseMethods: seq[string], parsedBody: ParsedBody): NimNode =
 
   # Copy formal params of constructor def into the closure result type.
   # Note: Closure has void return type, so add empty first child.
@@ -366,17 +366,30 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
       patchCallBase.add(arg)
     closure.procBody.add(patchCallBase)
 
-  # 2. var defs
+  # 2. inject base
+  if parsedBody.baseCall.isSome:
+    closure.procBody.add(
+      newVarStmt(ident "base", newNimNode(nnkObjConstr).add(baseSymbol))
+    )
+    for baseMethod in baseMethods:
+      closure.procBody.add(
+        newAssignment(
+          newDotExpr(ident "base", ident baseMethod),
+          newDotExpr(ident "self", ident baseMethod),
+        )
+      )
+
+  # 3. var defs
   for varDef in parsedBody.varDefs:
     closure.procBody.add(varDef)
 
-  # 3. private procs
+  # 4. private procs
   for privateProc in parsedBody.privateProcs:
     closure.procBody.add(
       privateProc.procDef
     )
 
-  # 4. exported procs
+  # 5. exported procs
   for exportedProc in parsedBody.exportedProcs:
     closure.procBody.add(
       newAssignment(
@@ -537,7 +550,7 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   let overloadInfo = compareProcs(baseMethods, parsedBody.exportedProcs)
 
   let typeSection = assembleTypeSection(classDef, baseSymbol, overloadInfo.newProcs)
-  let patchProc = assemblePatchProc(classDef, ctor, baseSymbol, parsedBody)
+  let patchProc = assemblePatchProc(classDef, ctor, baseSymbol, baseMethods, parsedBody)
 
   result.add(typeSection)
   result.add(patchProc)
