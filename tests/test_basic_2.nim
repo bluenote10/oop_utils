@@ -2,8 +2,7 @@ import closure_methods
 import strformat
 
 class(Person):
-  constructor:
-    proc newPerson(name: string, initAge: int)
+  ctor(newPerson) proc(name: string, initAge: int)
 
   let name = name
   var age = initAge
@@ -30,8 +29,7 @@ block:
 
 
 classOf(HackedPerson, Person):
-  constructor:
-    proc newHackedPerson(name: string, initAge: int)
+  ctor(newHackedPerson) proc(name: string, initAge: int)
 
   base(name & " Cheating", initAge)
 

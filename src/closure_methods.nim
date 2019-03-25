@@ -115,45 +115,46 @@ proc parseDefinition(n: NimNode): ClassDef =
     result.parseClassName(n)
     #result.identBaseClass = ident "RootObj"
 
-
-proc findBlock(n: NimNode, name: string): NimNode =
-  # To be removed after constructor syntax change...
-  var found = newSeq[NimNode]()
-  for child in n:
-    if child.kind == nnkCall and child[0].kind == nnkIdent and child[0].strVal == name:
-      found.add(child)
-  if found.len == 0:
-    error &"Could not find a section of type '{name}'"
-  if found.len == 2:
-    error &"There are {found.len} sections of type '{name}'; only one section allowed."
-  return found[0][1]
-
 # -----------------------------------------------------------------------------
 # Constructor parsing
 # -----------------------------------------------------------------------------
 
 type
-  ParsedConstructor = ref object
+  Constructor = ref object
     name: Option[string]
     args: seq[NimNode]
 
 proc isConstructor(n: NimNode): bool =
-  n.kind == nnkAsgn and (
-    (n[0].kind == nnkIdent and n[0].strVal == "constructor") or
-    (n[0].kind == nnkCall and n[0][0].kind == nnkIdent and n[0][0].strVal == "constructor")
+  echo n.treeRepr
+  # case1 matches:
+  # - ctor proc(...)
+  # - ctor(named) proc(...)
+  let case1 = n.kind == nnkCommand and (
+    (n[0].kind == nnkIdent and n[0].strVal == "ctor") or
+    (n[0].kind == nnkCall and n[0][0].kind == nnkIdent and n[0][0].strVal == "ctor")
   )
+  # case2 matches ctor without arguments:
+  # - ctor(named)
+  let case2 = n.kind == nnkCall and n[0].strVal == "ctor"
+  return case1 or case2
 
-proc parseConstructor(n: NimNode): ParsedConstructor =
-  let name =
-    if n.kind == nnkCall:
-      some(n[1].strVal)
-    else:
-      none(string)
-  var args = newSeq[NimNode]()
-  let formalParams = n[1][0]
-  for i in 1 ..< formalParams.len:
-    args.add(formalParams[i])
-  ParsedConstructor(name: name, args: args)
+proc parseConstructor(n: NimNode): Constructor =
+  expectKinds n, {nnkCommand, nnkCall}
+  if n.kind == nnkCommand:
+    let name =
+      if n[0].kind == nnkCall:
+        some(n[0][1].strVal)
+      else:
+        none(string)
+    # Copy children 1..n of ProcTy's FormalParams
+    var args = newSeq[NimNode]()
+    let formalParams = n[1][0]
+    for i in 1 ..< formalParams.len:
+      args.add(formalParams[i])
+    Constructor(name: name, args: args)
+  else:
+    let name = n[1].strVal
+    Constructor(name: some(name), args: @[])
 
 # -----------------------------------------------------------------------------
 # Base call parsing
@@ -228,7 +229,7 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
 
 type
   ParsedBody = ref object
-    ctor: Option[ParsedConstructor]
+    ctor: Option[Constructor]
     baseCall: Option[ParsedBaseCall]
     exportedProcs: seq[ExportedProc]
     privateProcs: seq[PrivateProc]
@@ -236,7 +237,7 @@ type
 
 proc parseBody(body: NimNode): ParsedBody =
   result = ParsedBody(
-    ctor: none(ParsedConstructor),
+    ctor: none(Constructor),
   )
   for n in body:
     if {nnkVarSection, nnkLetSection, nnkConstSection}.contains(n.kind):
@@ -251,12 +252,12 @@ proc parseBody(body: NimNode): ParsedBody =
       if result.ctor.isNone:
         result.ctor = some(n.parseConstructor())
       else:
-        error "Class definition must have only one constructor"
+        error "Class definition must have only one constructor", n
     elif n.isBaseCall():
       if result.baseCall.isNone:
         result.baseCall = some(n.parseBaseCall())
       else:
-        error "Class definition must have only one base call"
+        error "Class definition must have only one base call", n
 
 # -----------------------------------------------------------------------------
 # Assembly of output procs
@@ -324,18 +325,14 @@ proc convertProcDefIntoLambda(n: NimNode): NimNode =
   result[result.len - 1] = n[n.len - 1]
   # echo result.treeRepr
 
-proc assemblePatchProc(constructorDef: NimNode, classDef: ClassDef, baseSymbol: NimNode, parsedBody: ParsedBody): NimNode =
-  expectKind constructorDef, nnkProcDef
-  # echo "constructorDef:\n", constructorDef.treeRepr
+proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNode, parsedBody: ParsedBody): NimNode =
 
   # Copy formal params of constructor def into the closure result type.
-  # Note that we only have to copy from child 1 onwards, because child
-  # 0 is the return type, and our function returns nothing
+  # Note: Closure has void return type, so add empty first child.
   let ctorFormalParams = newNimNode(nnkFormalParams)
   ctorFormalParams.add(newEmptyNode()) # void return type
-  let formalParamsConstructorDef = constructorDef[3]
-  for i in 1 ..< formalParamsConstructorDef.len:
-    ctorFormalParams.add(formalParamsConstructorDef[i])
+  for arg in ctor.args:
+    ctorFormalParams.add(arg)   # TODO: maybe strip default arguments
 
   let returnType = newNimNode(nnkProcTy).add(
     ctorFormalParams,
@@ -401,19 +398,13 @@ proc assemblePatchProc(constructorDef: NimNode, classDef: ClassDef, baseSymbol: 
   # echo "patchProc:\n", result.treeRepr
 
 
-proc assembleNamedConstructor(constructorDef: NimNode, classDef: ClassDef, parsedBody: ParsedBody): NimNode =
-  expectKind constructorDef, nnkProcDef
-  result = constructorDef.copyNimTree()
-  result.procBody = newStmtList()
+proc assembleNamedConstructor(name: string, classDef: ClassDef, ctor: Constructor, parsedBody: ParsedBody): NimNode =
+  result = newProc(ident name, [], newStmtList())
 
-  # We inject the return type to the ctor proc as a convenience.
-  # Return type is at: FormalParams at index 3, return type at index 0.
-  # Note that we have to use the original definition node, not just
-  # the identClass, because we need a BracketExpr in case of generics.
-  # For now we make the injection optional, because of a macro bug
-  # in Nim that prevents injecting the type with generics.
-  if result[3][0].kind == nnkEmpty:
-    result[3][0] = classDef.rawClassDef
+  # Formal params
+  result.formalParams.add(classDef.rawClassDef) # return type
+  for arg in ctor.args:
+    result.formalParams.add(arg)
 
   # construct self
   result.procBody.add(
@@ -423,15 +414,15 @@ proc assembleNamedConstructor(constructorDef: NimNode, classDef: ClassDef, parse
     )
   )
 
-  # call constructor impl
+  # call patch
   let patchCall = newCall(
     newCall(
       ident "patch",
       ident "self",
     )
   )
-  for i in 1 ..< constructorDef.formalParams.len:
-    patchCall.add(constructorDef.formalParams[i][0])
+  for arg in ctor.args:
+    patchCall.add(arg[0])
   result.procBody.add(patchCall)
 
   # return expression
@@ -524,38 +515,36 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   # extract infos from definition
   let classDef = parseDefinition(definition)
 
-  # extract blocks and fields
-  body.preprocessBody()
-  let parsedBody = parseBody(body)
-  let constructorBlock = findBlock(body, "constructor")
-
   # get base TypeDef
+  echo base.treeRepr
+  echo base.getTypeInst.treeRepr
   expectKind base.getTypeInst, nnkBracketExpr
   expectLen base.getTypeInst, 2
   let baseSymbol = base.getTypeInst[1]  # because its a typedesc, the type symbol is child 1
+
+  # extract blocks and fields
+  body.preprocessBody()
+  let parsedBody = parseBody(body)
+
+  # TODO: add post parse verifications here
+
+  # TODO: allow generation of default ctor only if isAbstract == false
+  let ctor = parsedBody.ctor.get(Constructor(name: none(string), args: @[]))
 
   # recursive extraction of all base methods
   var baseMethods = newSeq[string]()
   extractBaseMethods(baseSymbol, baseMethods)
   let overloadInfo = compareProcs(baseMethods, parsedBody.exportedProcs)
 
-  let constructorDef = constructorBlock[0]  # TODO: find ProcDef, check only 1
-  # We inject the return type to the ctor proc as a convenience.
-  # Return type is at: FormalParams at index 3, return type at index 0.
-  # Note that we have to use the original definition node, not just
-  # the identClass, because we need a BracketExpr in case of generics.
-  # For now we make the injection optional, because of a macro bug
-  # in Nim that prevents injecting the type with generics.
-  if constructorDef[3][0].kind == nnkEmpty:
-    constructorDef[3][0] = classDef.rawClassDef
-
   let typeSection = assembleTypeSection(classDef, baseSymbol, overloadInfo.newProcs)
-  let namedConstructorProc = assembleNamedConstructor(constructorDef, classDef, parsedBody)
-  let patchProc = assemblePatchProc(constructorDef, classDef, baseSymbol, parsedBody)
+  let patchProc = assemblePatchProc(classDef, ctor, baseSymbol, parsedBody)
 
   result.add(typeSection)
   result.add(patchProc)
-  result.add(namedConstructorProc)
+
+  for name in ctor.name:
+    let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor, parsedBody)
+    result.add(namedConstructorProc)
 
   echo result.repr
   #echo result.treeRepr
@@ -588,13 +577,22 @@ when false:
     discard
 
   static:
-    test0:
+    test1:
       constructor(named) = proc (x: T = 10)
       constructor = proc(x: T = 10)
-      #ctor[T](x: T = 10)
+
+      # ctor[T](x: T = 10)  # default args not allowed, so we need a ProcTy
+      @ctor proc(x: T = 10)
+      @ctor(named) proc(x: T = 10)
+
+      ctor proc(x: T = 10)
+      ctor(named) proc(x: T = 10)
+
+      base(x, y)
+
       proc t[T](x: T = 10)
 
-    test1:
+    test0:
       proc patch[T](x: T) =
         discard
 

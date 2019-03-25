@@ -1,22 +1,19 @@
 import closure_methods
 
 class(A):
-  constructor:
-    proc newA*()
+  ctor(newA) proc()
 
   proc a*(): string = "a"
 
 classOf(AB, A):
-  constructor:
-    proc newAB*()
+  ctor(newAB) proc()
 
   base()
 
   proc b*(): string = "b"
 
 classOf(ABC, AB):
-  constructor:
-    proc newABC*()
+  ctor(newABC) proc()
 
   base()
 

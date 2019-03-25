@@ -3,8 +3,7 @@ import times
 import strformat
 
 class(Base):
-  constructor:
-    proc newBase*(xInit: int)
+  ctor(newBase) proc(xInit: int)
 
   var x = xInit
 
@@ -12,53 +11,43 @@ class(Base):
     x + value
 
 classOf(A, Base):
-  constructor:
-    proc newA*()
+  ctor(newA)
   base(1)
 
 classOf(B, Base):
-  constructor:
-    proc newB*()
+  ctor(newB)
   base(2)
 
 classOf(C, Base):
-  constructor:
-    proc newC*()
+  ctor(newC)
   base(3)
 
 classOf(D, Base):
-  constructor:
-    proc newD*()
+  ctor(newD)
   base(4)
 
 classOf(E, Base):
-  constructor:
-    proc newE*()
+  ctor(newE)
   base(5)
 
 classOf(F, Base):
-  constructor:
-    proc newF*()
+  ctor(newF)
   base(6)
 
 classOf(G, Base):
-  constructor:
-    proc newG*()
+  ctor(newG)
   base(7)
 
 classOf(H, Base):
-  constructor:
-    proc newH*()
+  ctor(newH)
   base(8)
 
 classOf(I, Base):
-  constructor:
-    proc newI*()
+  ctor(newI)
   base(9)
 
 classOf(J, Base):
-  constructor:
-    proc newJ*()
+  ctor(newJ)
   base(10)
 
 block:

@@ -1,8 +1,7 @@
 import closure_methods
 
 class(X):
-  constructor:
-    proc newX()
+  ctor(newX) proc()
 
   let a = 1
   var b = 2

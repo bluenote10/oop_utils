@@ -1,8 +1,7 @@
 import closure_methods
 
 class(Base):
-  constructor:
-    proc newBase*(baseInit: string)
+  ctor(newBase) proc(baseInit: string)
 
   var state = baseInit
 
@@ -10,8 +9,7 @@ class(Base):
 
 
 classOf(Child, Base):
-  constructor:
-    proc newChild*()
+  ctor(newChild) proc()
 
   base("base")
 
