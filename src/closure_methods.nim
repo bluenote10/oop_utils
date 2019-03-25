@@ -8,7 +8,9 @@ import strutils
 # Misc publics
 # -----------------------------------------------------------------------------
 
-template abstractMethod* {.pragma.}
+# Both doesn't work...
+# template abstractMethod* {.pragma.}
+# {.pragma: abstractMethod.}
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -83,6 +85,12 @@ proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[string]) =
       let typeNode = identDef[1]
       if nameNode.kind == nnkPostfix and nameNode.len == 2: # because of export * symbol
         baseMethods.add(nameNode[1].strVal)
+      elif nameNode.kind == nnkPragmaExpr and nameNode.len == 2 and
+           nameNode[0].kind == nnkPostfix and nameNode[0].len == 2:
+        # TODO: extract isAbstract: true
+        baseMethods.add(nameNode[0][1].strVal)
+      else:
+        error &"Unexpected node in base rec list:{nameNode.repr}"
     else:
       error &"Expected nnkIdentDefs, got {identDef.repr}"
 
@@ -207,12 +215,12 @@ proc convertProcDefIntoField(procdef: NimNode, isAbstract: bool): NimNode =
   # We need to turn funcName into funcName* for export
   let procIdent = procdef[0]
   let field =
-    if true: # not isAbstract: # custom pragma doesn't seem to work
+    if not isAbstract: # custom pragma doesn't seem to work, abuse 'used'?
       publicIdent(procIdent.strVal)
     else:
       newNimNode(nnkPragmaExpr).add(
         publicIdent(procIdent.strVal),
-        newNimNode(nnkPragma).add(bindSym "abstractMethod"),
+        newNimNode(nnkPragma).add(ident "used"),
       )
   let fieldType = newNimNode(nnkProcTy).add(
     procdef[3], # copy formal params
