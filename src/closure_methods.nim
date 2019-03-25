@@ -46,6 +46,12 @@ proc `genericParams=`(n: NimNode, other: NimNode) =
   expectKind other, nnkGenericParams
   n[2] = other
 
+proc publicIdent(s: string): NimNode =
+  newNimNode(nnkPostfix).add(
+    ident "*",
+    ident s,
+  )
+
 # -----------------------------------------------------------------------------
 # Base type inspection
 # -----------------------------------------------------------------------------
@@ -305,7 +311,7 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, newProcs: seq[
   # build type section
   let typeSection = newNimNode(nnkTypeSection)
   let typeDef = newNimNode(nnkTypeDef).add(
-    classDef.identClass,
+    publicIdent(classDef.identClass.strVal),
     classDef.genericParams,
     newNimNode(nnkRefTy).add(
       newNimNode(nnkObjectTy).add(
@@ -354,7 +360,7 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
 
   # main proc def
   result = newProc(
-    ident "patch",
+    publicIdent("patch"),
     [returnType, newIdentDefs(ident "self", classDef.rawClassDef)],
   )
 
@@ -423,17 +429,9 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
   result.procBody = procBody
   # echo "patchProc:\n", result.treeRepr
 
-
-proc assembleNamedConstructor(name: string, classDef: ClassDef, ctor: Constructor, parsedBody: ParsedBody): NimNode =
-  result = newProc(ident name, [], newStmtList())
-
-  # Formal params
-  result.formalParams.add(classDef.rawClassDef) # return type
-  for arg in ctor.args:
-    result.formalParams.add(arg)
-
+proc assembleNamedConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constructor) =
   # construct self
-  result.procBody.add(
+  procDef.procBody.add(
     newLetStmt(
       ident "self",
       newCall(classDef.rawClassDef)
@@ -449,10 +447,41 @@ proc assembleNamedConstructor(name: string, classDef: ClassDef, ctor: Constructo
   )
   for arg in ctor.args:
     patchCall.add(arg[0])
-  result.procBody.add(patchCall)
+  procDef.procBody.add(patchCall)
 
   # return expression
-  result.procBody.add(ident "self")
+  procDef.procBody.add(ident "self")
+
+
+proc assembleNamedConstructor(name: string, classDef: ClassDef, ctor: Constructor, parsedBody: ParsedBody): NimNode =
+  result = newProc(publicIdent(name), [], newStmtList())
+
+  # Formal params
+  result.formalParams.add(classDef.rawClassDef) # return type
+  for arg in ctor.args:
+    result.formalParams.add(arg)
+
+  assembleNamedConstructorBody(result, classDef, ctor)
+
+
+proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor, parsedBody: ParsedBody): NimNode =
+  result = newProc(publicIdent("init"), [], newStmtList())
+
+  # Formal params
+  result.formalParams.add(classDef.rawClassDef) # return type
+  result.formalParams.add(
+    newIdentDefs(
+      ident "T",
+      newNimNode(nnkBracketExpr).add(
+        ident "typedesc",
+        classDef.identClass,
+      )
+    )
+  )
+  for arg in ctor.args:
+    result.formalParams.add(arg)
+
+  assembleNamedConstructorBody(result, classDef, ctor)
 
 
 # -----------------------------------------------------------------------------
@@ -568,6 +597,9 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   result.add(typeSection)
   result.add(patchProc)
 
+  # if not isAbstract:
+  let genericConstructorProc = assembleGenericConstructor(classDef, ctor, parsedBody)
+  result.add(genericConstructorProc)
   for name in ctor.name:
     let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor, parsedBody)
     result.add(namedConstructorProc)
@@ -603,7 +635,7 @@ when false:
     discard
 
   static:
-    test1:
+    test0:
       constructor(named) = proc (x: T = 10)
       constructor = proc(x: T = 10)
 
@@ -621,5 +653,8 @@ when false:
     test0:
       proc patch[T](x: T) =
         discard
+
+    test1:
+      proc init(T: typedesc[Foo])
 
     error("Tree dumped")
