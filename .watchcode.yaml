@@ -16,7 +16,8 @@ tasks:
       #- "nim -r c ./tests/test_inheritance_chain.nim"
       #- "nim -r c ./tests/test_overload.nim"
       #- "nim -r c ./tests/test_empty_ctor.nim"
-      - "nim -r c ./tests/test_base_calls.nim"
+      #- "nim -r c ./tests/test_base_calls.nim"
+      - "nim -r c ./tests/test_abstract.nim"
 
       #- "nim -r js ./benchmarks/basic_dispatch_methods.nim"
       #- "nim -r js ./benchmarks/basic_dispatch_closures.nim"

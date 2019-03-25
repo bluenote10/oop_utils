@@ -208,11 +208,22 @@ proc convertProcDefIntoField(procdef: NimNode): NimNode =
 proc parseProcDef(procDef: NimNode): ParsedProc =
   expectKind procDef, nnkProcDef
   if procDef[0].kind == nnkPostfix and procDef[0][0].strVal == "*":
-    # get rid of postfix export "*"
+    let name = procDef[0][1].strVal
+    let isAbstract = procDef.body.kind == nnkEmpty
     let transformedProcDef = procDef.copyNimTree()
+
+    # transform 1: get rid of postfix export "*"
     transformedProcDef[0] = procDef[0][1]
+
+    # transform 2: inject dummy body for abstracts
+    if isAbstract:
+      let errorMsg = &"called abstract method '{name}'"
+      transformedProcDef.body = newStmtList(
+        newCall(ident "doAssert", ident "false", newStrLitNode(errorMsg))
+      )
+
     result = ExportedProc(
-      name: transformedProcDef[0].strVal,
+      name: name,
       procDef: transformedProcDef,
       isAbstract: false,
       fieldDef: convertProcDefIntoField(transformedProcDef)
@@ -258,6 +269,8 @@ proc parseBody(body: NimNode): ParsedBody =
         result.baseCall = some(n.parseBaseCall())
       else:
         error "Class definition must have only one base call", n
+    else:
+      error "Disallowed node in class definition:\n" & n.repr, n
 
 # -----------------------------------------------------------------------------
 # Assembly of output procs
