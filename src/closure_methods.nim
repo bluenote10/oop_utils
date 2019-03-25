@@ -2,6 +2,7 @@ import macros
 import strformat
 import options
 import sets
+import strutils
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -163,7 +164,7 @@ type
     args: seq[NimNode]
 
 proc isBaseCall(n: NimNode): bool =
-  n.kind == nnkCall and n[0].strVal == "base"
+  n.kind == nnkCall and n[0].kind == nnkIdent and n[0].strVal == "base"
 
 proc parseBaseCall(n: NimNode): ParsedBaseCall =
   var args = newSeq[NimNode]()
@@ -226,12 +227,28 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
 # -----------------------------------------------------------------------------
 
 type
+  Getter = ref object
+    ident: NimNode
+    name: string
+  Setter = ref object
+    ident: NimNode
+    name: string
+
+proc newGetter(ident: NimNode): Getter =
+  Getter(ident: ident, name: "get" & ident.strVal.capitalizeAscii())
+
+proc newSetter(ident: NimNode): Setter =
+  Setter(ident: ident, name: "set" & ident.strVal.capitalizeAscii())
+
+type
   ParsedBody = ref object
     ctor: Option[ParsedConstructor]
     baseCall: Option[ParsedBaseCall]
     exportedProcs: seq[ExportedProc]
     privateProcs: seq[PrivateProc]
     varDefs: seq[NimNode]
+    getter: seq[Getter]
+    setter: seq[Setter]
 
 proc parseBody(body: NimNode): ParsedBody =
   result = ParsedBody(
@@ -256,6 +273,18 @@ proc parseBody(body: NimNode): ParsedBody =
         result.baseCall = some(n.parseBaseCall())
       else:
         error "Class definition must have only one base call"
+    #[
+    elif n.kind == nnkCall and n[0].kind == nnkBracketExpr:
+      echo n.treeRepr
+      if n[0].strVal == "getter":
+        result.getter.add(newGetter(n[1]))
+      elif n[0].strVal == "setter":
+        result.getter.add(newGetter(n[1]))
+      elif n[0].strVal == "getterSetter": # make case insensitive?
+        result.getter.add(newGetter(n[1]))
+      elif n[0].strVal != "constructor":  # TODO: get rid of
+        error &"Unallowed call:\n{n.repr}"
+    ]#
 
 # -----------------------------------------------------------------------------
 # Assembly of output procs
@@ -438,6 +467,77 @@ proc assembleNamedConstructor(constructorDef: NimNode, classDef: ClassDef, parse
 
 
 # -----------------------------------------------------------------------------
+# Preprocessing
+# -----------------------------------------------------------------------------
+
+proc preprocessBody(body: NimNode) =
+  ## Input body preprocessing. Currently used to inject getter/setter.
+  var i = 0
+  while i < body.len:
+    let n = body[i]
+    if n.kind == nnkCall and n[0].kind == nnkBracketExpr and n.len >= 2:
+      let ident = n[1]
+      let callName = n[0][0].strVal
+      let typ = n[0][1]
+
+      var produceGetter = false
+      var produceSetter = false
+      var getterName: string
+      var setterName: string
+      # make comparisons style insensitive?
+      if callName == "getter":
+        produceGetter = true
+        if n.len == 3:
+          getterName = n[2].strVal
+        else:
+          getterName = "get" & ident.strVal.capitalizeAscii()
+      elif callName == "setter":
+        produceSetter = true
+        if n.len == 3:
+          setterName = n[2].strVal
+        else:
+          setterName = "set" & ident.strVal.capitalizeAscii()
+      elif callName == "getterSetter":
+        produceGetter = true
+        produceSetter = true
+        if n.len == 4:
+          getterName = n[2].strVal
+          setterName = n[3].strVal
+        else:
+          getterName = "get" & ident.strVal.capitalizeAscii()
+          setterName = "set" & ident.strVal.capitalizeAscii()
+
+      echo i
+      if produceGetter or produceSetter:
+        body.del(i)
+
+      if produceGetter:
+        body.insert(i, newProc(
+          newNimNode(nnkPostfix).add(
+            ident "*",
+            ident getterName,
+          ),
+          [typ],
+          newStmtList().add(ident),
+        ))
+      if produceSetter:
+        let paramSym = genSym(nskParam)
+        body.insert(i, newProc(
+          newNimNode(nnkPostfix).add(
+            ident "*",
+            ident setterName,
+          ),
+          [newEmptyNode(), newIdentDefs(paramSym, typ)],
+          newStmtList().add(
+            newAssignment(ident, paramSym),
+          ),
+        ))
+
+      if produceGetter and produceSetter:
+        i += 1
+    i += 1
+
+# -----------------------------------------------------------------------------
 # Main class macro impl
 # -----------------------------------------------------------------------------
 
@@ -453,6 +553,7 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   let classDef = parseDefinition(definition)
 
   # extract blocks and fields
+  body.preprocessBody()
   let parsedBody = parseBody(body)
   let constructorBlock = findBlock(body, "constructor")
 
