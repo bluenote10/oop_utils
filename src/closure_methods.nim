@@ -227,28 +227,12 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
 # -----------------------------------------------------------------------------
 
 type
-  Getter = ref object
-    ident: NimNode
-    name: string
-  Setter = ref object
-    ident: NimNode
-    name: string
-
-proc newGetter(ident: NimNode): Getter =
-  Getter(ident: ident, name: "get" & ident.strVal.capitalizeAscii())
-
-proc newSetter(ident: NimNode): Setter =
-  Setter(ident: ident, name: "set" & ident.strVal.capitalizeAscii())
-
-type
   ParsedBody = ref object
     ctor: Option[ParsedConstructor]
     baseCall: Option[ParsedBaseCall]
     exportedProcs: seq[ExportedProc]
     privateProcs: seq[PrivateProc]
     varDefs: seq[NimNode]
-    getter: seq[Getter]
-    setter: seq[Setter]
 
 proc parseBody(body: NimNode): ParsedBody =
   result = ParsedBody(
@@ -273,18 +257,6 @@ proc parseBody(body: NimNode): ParsedBody =
         result.baseCall = some(n.parseBaseCall())
       else:
         error "Class definition must have only one base call"
-    #[
-    elif n.kind == nnkCall and n[0].kind == nnkBracketExpr:
-      echo n.treeRepr
-      if n[0].strVal == "getter":
-        result.getter.add(newGetter(n[1]))
-      elif n[0].strVal == "setter":
-        result.getter.add(newGetter(n[1]))
-      elif n[0].strVal == "getterSetter": # make case insensitive?
-        result.getter.add(newGetter(n[1]))
-      elif n[0].strVal != "constructor":  # TODO: get rid of
-        error &"Unallowed call:\n{n.repr}"
-    ]#
 
 # -----------------------------------------------------------------------------
 # Assembly of output procs
