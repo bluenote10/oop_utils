@@ -5,15 +5,21 @@ import sets
 import strutils
 
 # -----------------------------------------------------------------------------
+# Misc publics
+# -----------------------------------------------------------------------------
+
+template abstractMethod* {.pragma.}
+
+# -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
 
-iterator items*[T](o: Option[T]): T =
+iterator items[T](o: Option[T]): T =
   if o.isSome:
     yield o.get
 
 
-proc expectKinds*(n: NimNode, kinds: set[NimNodeKind]) {.compileTime.} =
+proc expectKinds(n: NimNode, kinds: set[NimNodeKind]) {.compileTime.} =
   ## checks that `n` is of kind `k`. If this is not the case,
   ## compilation aborts with an error message. This is useful for writing
   ## macros that check the AST that is passed to them.
@@ -197,13 +203,17 @@ type
     procDef: NimNode
 
 
-proc convertProcDefIntoField(procdef: NimNode): NimNode =
+proc convertProcDefIntoField(procdef: NimNode, isAbstract: bool): NimNode =
   # We need to turn funcName into funcName* for export
   let procIdent = procdef[0]
-  let field = newNimNode(nnkPostfix).add(
-    ident "*",
-    procIdent,
-  )
+  let field =
+    if true: # not isAbstract: # custom pragma doesn't seem to work
+      publicIdent(procIdent.strVal)
+    else:
+      newNimNode(nnkPragmaExpr).add(
+        publicIdent(procIdent.strVal),
+        newNimNode(nnkPragma).add(bindSym "abstractMethod"),
+      )
   let fieldType = newNimNode(nnkProcTy).add(
     procdef[3], # copy formal params
     newEmptyNode(),
@@ -231,8 +241,8 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
     result = ExportedProc(
       name: name,
       procDef: transformedProcDef,
-      isAbstract: false,
-      fieldDef: convertProcDefIntoField(transformedProcDef)
+      isAbstract: isAbstract,
+      fieldDef: convertProcDefIntoField(transformedProcDef, isAbstract)
     )
   else:
     result = PrivateProc(
@@ -654,7 +664,13 @@ when false:
       proc patch[T](x: T) =
         discard
 
-    test1:
+    test0:
       proc init(T: typedesc[Foo])
+
+    test1:
+      type
+        Abstract* = ref object of RootObj
+          #id*: proc (): string
+          id* {.abstractMethod.}: proc (): string
 
     error("Tree dumped")
