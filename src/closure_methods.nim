@@ -383,9 +383,10 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
   )
 
   # attach generic params
-  result.genericParams = newNimNode(nnkGenericParams)
-  for genericParam in classDef.genericParams:
-    result.genericParams.add(genericParam)
+  if classDef.genericParams.len > 0:
+    result.genericParams = newNimNode(nnkGenericParams)
+    for genericParam in classDef.genericParams:
+      result.genericParams.add(genericParam)
 
   # build closure body
   let closure = newLambda()
@@ -450,7 +451,7 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
 proc assembleNamedConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constructor) =
   # construct self
   procDef.procBody.add(
-    newLetStmt(
+    newVarStmt(
       ident "self",
       newCall(classDef.rawClassDef)
     )
@@ -474,10 +475,16 @@ proc assembleNamedConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Co
 proc assembleNamedConstructor(name: string, classDef: ClassDef, ctor: Constructor, parsedBody: ParsedBody): NimNode =
   result = newProc(publicIdent(name), [], newStmtList())
 
-  # Formal params
+  # attach formal params
   result.formalParams.add(classDef.rawClassDef) # return type
   for arg in ctor.args:
     result.formalParams.add(arg)
+
+  # attach generic params
+  if classDef.genericParams.len > 0:
+    result.genericParams = newNimNode(nnkGenericParams)
+    for genericParam in classDef.genericParams:
+      result.genericParams.add(genericParam)
 
   assembleNamedConstructorBody(result, classDef, ctor)
 
@@ -485,11 +492,11 @@ proc assembleNamedConstructor(name: string, classDef: ClassDef, ctor: Constructo
 proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor, parsedBody: ParsedBody): NimNode =
   result = newProc(publicIdent("init"), [], newStmtList())
 
-  # Formal params
+  # attach formal params
   result.formalParams.add(classDef.rawClassDef) # return type
   result.formalParams.add(
     newIdentDefs(
-      ident "T",
+      genSym(nskParam),
       newNimNode(nnkBracketExpr).add(
         ident "typedesc",
         classDef.identClass,
@@ -498,6 +505,12 @@ proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor, parsedBod
   )
   for arg in ctor.args:
     result.formalParams.add(arg)
+
+  # attach generic params
+  if classDef.genericParams.len > 0:
+    result.genericParams = newNimNode(nnkGenericParams)
+    for genericParam in classDef.genericParams:
+      result.genericParams.add(genericParam)
 
   assembleNamedConstructorBody(result, classDef, ctor)
 
@@ -622,6 +635,8 @@ proc classImpl(definition, base, body: NimNode): NimNode =
     let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor, parsedBody)
     result.add(namedConstructorProc)
 
+  # Take a copy as a work-around for: https://github.com/nim-lang/Nim/issues/10902
+  result = result.copy
   echo result.repr
   #echo result.treeRepr
 
