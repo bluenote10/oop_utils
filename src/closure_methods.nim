@@ -128,6 +128,7 @@ proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[BaseProc]) =
 
 type
   ClassDef = ref object
+    name: string
     rawClassDef: NimNode
     identClass: NimNode
     genericParams: NimNode
@@ -150,18 +151,11 @@ proc parseClassName(classDef: ClassDef, n: NimNode) =
   else:
     error &"Cannot parse class definition: {n.repr}"
 
-
 proc parseDefinition(n: NimNode): ClassDef =
   result = ClassDef()
-  if n.kind == nnkInfix and n[0].strVal == "of":
-    result.rawClassDef = n[1]
-    result.parseClassName(n[1])
-    #result.identBaseClass = n[2]
-    error "of syntax is deprecated"
-  else:
-    result.rawClassDef = n
-    result.parseClassName(n)
-    #result.identBaseClass = ident "RootObj"
+  result.rawClassDef = n
+  result.parseClassName(n)
+  result.name = result.identClass.strVal
 
 # -----------------------------------------------------------------------------
 # Constructor parsing
@@ -324,23 +318,57 @@ proc parseBody(body: NimNode): ParsedBody =
       error "Disallowed node in class definition:\n" & n.repr, n
 
 # -----------------------------------------------------------------------------
-# Assembly of output procs
+# Overload analysis
 # -----------------------------------------------------------------------------
 
 type
   OverloadInfo = ref object
+    isAbstract: bool
     isFullyOverloaded: bool
     newProcs: seq[ExportedProc]
     overloadedProcs: seq[ExportedProc]
+    remainingBaseProcs: seq[BaseProc]
 
 proc compareProcs(baseProcs: seq[BaseProc], exportedProcs: seq[ExportedProc]): OverloadInfo =
-  result = OverloadInfo()
+  ## Generates the overload information
+  result = OverloadInfo(isAbstract: false)
+
+  # helper sets
   let baseProcsNameSet = baseProcs.mapIt(it.name).toHashSet()
+  var overloadedProcsNameSet = initHashSet[string]()
+
   for exportedProc in exportedProcs:
+    # Any abstract proc defined on self makes it abstract
+    if exportedProc.isAbstract:
+      result.isAbstract = true
     if baseProcsNameSet.contains(exportedProc.name):
       result.overloadedProcs.add(exportedProc)
+      overloadedProcsNameSet.incl(exportedProc.name)
     else:
       result.newProcs.add(exportedProc)
+
+  # compute remaining base procs
+  for baseProc in baseProcs:
+    if not overloadedProcsNameSet.contains(baseProc.name):
+      result.remainingBaseProcs.add(baseProc)
+
+  # check if there are abstracts in the remaining base procs
+  for remainingBaseProc in result.remainingBaseProcs:
+    if remainingBaseProc.isAbstract:
+      result.isAbstract = true
+
+  result.isFullyOverloaded = (result.remainingBaseProcs.len == 0)
+
+  echo "Overload analysis"
+  echo "  isAbstract:         ", result.isAbstract
+  echo "  isFullyOverloaded:  ", result.isFullyOverloaded
+  echo "  newProcs:           ", result.newProcs.mapIt(it.name)
+  echo "  overloadedProcs:    ", result.overloadedProcs.mapIt(it.name)
+  echo "  remainingBaseProcs: ", result.remainingBaseProcs.mapIt(it.name)
+
+# -----------------------------------------------------------------------------
+# Assembly of output procs
+# -----------------------------------------------------------------------------
 
 proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, newProcs: seq[ExportedProc]): NimNode =
   # create type fields from exported methods
@@ -618,15 +646,20 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   body.preprocessBody()
   let parsedBody = parseBody(body)
 
-  # TODO: add post parse verifications here
-
-  # TODO: allow generation of default ctor only if isAbstract == false
-  let ctor = parsedBody.ctor.get(Constructor(name: none(string), args: @[]))
-
   # recursive extraction of all base methods
   var baseMethods = newSeq[BaseProc]()
   extractBaseMethods(baseSymbol, baseMethods)
   let overloadInfo = compareProcs(baseMethods, parsedBody.exportedProcs)
+
+  # Post parse verifications here
+  for ctor in parsedBody.ctor:
+    if ctor.name.isSome and overloadInfo.isAbstract:
+      error &"Class '{classDef.name}' cannot have a named constructor '{ctor.name.get}' because it is abstract."
+
+  if not overloadInfo.isFullyOverloaded and parsedBody.baseCall.isNone:
+    error &"Class '{classDef.name}' needs to have a base(...) call because it doesn't overload all parent methods."
+
+  let ctor = parsedBody.ctor.get(Constructor(name: none(string), args: @[]))
 
   let typeSection = assembleTypeSection(classDef, baseSymbol, overloadInfo.newProcs)
   let patchProc = assemblePatchProc(classDef, ctor, baseSymbol, baseMethods, parsedBody)
@@ -634,12 +667,13 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   result.add(typeSection)
   result.add(patchProc)
 
-  # if not isAbstract:
-  let genericConstructorProc = assembleGenericConstructor(classDef, ctor, parsedBody)
-  result.add(genericConstructorProc)
-  for name in ctor.name:
-    let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor, parsedBody)
-    result.add(namedConstructorProc)
+  # Generate constructors if not abstract
+  if not overloadInfo.isAbstract:
+    let genericConstructorProc = assembleGenericConstructor(classDef, ctor, parsedBody)
+    result.add(genericConstructorProc)
+    for name in ctor.name:
+      let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor, parsedBody)
+      result.add(namedConstructorProc)
 
   # Take a copy as a work-around for: https://github.com/nim-lang/Nim/issues/10902
   result = result.copy
