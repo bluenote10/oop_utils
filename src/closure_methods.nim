@@ -3,6 +3,7 @@ import strformat
 import options
 import sets
 import strutils
+import sequtils
 
 # -----------------------------------------------------------------------------
 # Misc publics
@@ -60,11 +61,32 @@ proc publicIdent(s: string): NimNode =
     ident s,
   )
 
+proc newLambda(): NimNode =
+  newNimNode(nnkLambda).add(
+    newEmptyNode(),
+    newEmptyNode(),
+    newEmptyNode(),
+    newNimNode(nnkFormalParams),
+    newEmptyNode(),
+    newEmptyNode(),
+    newStmtList(),
+  )
+
+proc convertProcDefIntoLambda(n: NimNode): NimNode =
+  result = newLambda()
+  result.formalParams = n.formalParams
+  result.procBody = n.procBody
+
 # -----------------------------------------------------------------------------
 # Base type inspection
 # -----------------------------------------------------------------------------
 
-proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[string]) =
+type
+  BaseProc = ref object
+    name: string
+    isAbstract: bool
+
+proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[BaseProc]) =
   ## Recursively traverses over base types and collects their method fields.
   ## TODO: collect 'abstract' custom annotation field information.
 
@@ -84,11 +106,17 @@ proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[string]) =
       let nameNode = identDef[0]
       let typeNode = identDef[1]
       if nameNode.kind == nnkPostfix and nameNode.len == 2: # because of export * symbol
-        baseMethods.add(nameNode[1].strVal)
+        baseMethods.add(BaseProc(
+          name: nameNode[1].strVal,
+          isAbstract: false,
+        ))
       elif nameNode.kind == nnkPragmaExpr and nameNode.len == 2 and
            nameNode[0].kind == nnkPostfix and nameNode[0].len == 2:
         # TODO: extract isAbstract: true
-        baseMethods.add(nameNode[0][1].strVal)
+        baseMethods.add(BaseProc(
+          name: nameNode[0][1].strVal,
+          isAbstract: true,
+        ))
       else:
         error &"Unexpected node in base rec list:{nameNode.repr}"
     else:
@@ -145,7 +173,6 @@ type
     args: seq[NimNode]
 
 proc isConstructor(n: NimNode): bool =
-  echo n.treeRepr
   # case1 matches:
   # - ctor proc(...)
   # - ctor(named) proc(...)
@@ -306,11 +333,11 @@ type
     newProcs: seq[ExportedProc]
     overloadedProcs: seq[ExportedProc]
 
-proc compareProcs(baseProcs: seq[string], exportedProcs: seq[ExportedProc]): OverloadInfo =
+proc compareProcs(baseProcs: seq[BaseProc], exportedProcs: seq[ExportedProc]): OverloadInfo =
   result = OverloadInfo()
-  let baseProcsSet = baseProcs.toSet()
+  let baseProcsNameSet = baseProcs.mapIt(it.name).toHashSet()
   for exportedProc in exportedProcs:
-    if baseProcsSet.contains(exportedProc.name):
+    if baseProcsNameSet.contains(exportedProc.name):
       result.overloadedProcs.add(exportedProc)
     else:
       result.newProcs.add(exportedProc)
@@ -345,24 +372,7 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, newProcs: seq[
   return typeSection
 
 
-proc newLambda(): NimNode =
-  newNimNode(nnkLambda).add(
-    newEmptyNode(),
-    newEmptyNode(),
-    newEmptyNode(),
-    newNimNode(nnkFormalParams),
-    newEmptyNode(),
-    newEmptyNode(),
-    newStmtList(),
-  )
-
-proc convertProcDefIntoLambda(n: NimNode): NimNode =
-  result = newLambda()
-  result[3] = n[3]
-  result[result.len - 1] = n[n.len - 1]
-  # echo result.treeRepr
-
-proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNode, baseMethods: seq[string], parsedBody: ParsedBody): NimNode =
+proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNode, baseMethods: seq[BaseProc], parsedBody: ParsedBody): NimNode =
 
   # Copy formal params of constructor def into the closure result type.
   # Note: Closure has void return type, so add empty first child.
@@ -412,8 +422,8 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
     for baseMethod in baseMethods:
       closure.procBody.add(
         newAssignment(
-          newDotExpr(ident "base", ident baseMethod),
-          newDotExpr(ident "self", ident baseMethod),
+          newDotExpr(ident "base", ident baseMethod.name),
+          newDotExpr(ident "self", ident baseMethod.name),
         )
       )
 
@@ -436,16 +446,13 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
       )
     )
 
-  let procBody = newStmtList()
-  procBody.add(
+  result.procBody = newStmtList()
+  result.procBody.add(
     newAssignment(
       ident "result",
       closure,
     )
   )
-
-  # attach proc body
-  result.procBody = procBody
   # echo "patchProc:\n", result.treeRepr
 
 proc assembleNamedConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constructor) =
@@ -556,7 +563,6 @@ proc preprocessBody(body: NimNode) =
           getterName = "get" & ident.strVal.capitalizeAscii()
           setterName = "set" & ident.strVal.capitalizeAscii()
 
-      echo i
       if produceGetter or produceSetter:
         body.del(i)
 
@@ -602,8 +608,8 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   let classDef = parseDefinition(definition)
 
   # get base TypeDef
-  echo base.treeRepr
-  echo base.getTypeInst.treeRepr
+  # echo base.treeRepr
+  # echo base.getTypeInst.treeRepr
   expectKind base.getTypeInst, nnkBracketExpr
   expectLen base.getTypeInst, 2
   let baseSymbol = base.getTypeInst[1]  # because its a typedesc, the type symbol is child 1
@@ -618,7 +624,7 @@ proc classImpl(definition, base, body: NimNode): NimNode =
   let ctor = parsedBody.ctor.get(Constructor(name: none(string), args: @[]))
 
   # recursive extraction of all base methods
-  var baseMethods = newSeq[string]()
+  var baseMethods = newSeq[BaseProc]()
   extractBaseMethods(baseSymbol, baseMethods)
   let overloadInfo = compareProcs(baseMethods, parsedBody.exportedProcs)
 
