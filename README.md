@@ -17,7 +17,7 @@ The design decision to model methods as closures comes at the price that every d
       # methods...
     ```
     It is clear what can/cannot change about an object.
-- In constrast to having explicit object fields, there are no name conflicts in class hierarchies. For instance:
+- In contrast to having explicit object fields, there are no name conflicts in class hierarchies. For instance:
     ```nim
     class(UiComponent):
       var state: SomeRenderState
