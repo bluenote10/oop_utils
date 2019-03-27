@@ -28,7 +28,7 @@ The design decision to model methods as closures comes at the price that every d
       # methods...
     ```
 
-The secondard goal was to make the DSL as much DRY as as possible.
+A secondary goal was to make the DSL as much DRY as possible.
 
 
 ## Examples
