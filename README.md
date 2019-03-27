@@ -158,9 +158,7 @@ The syntax for generic classes is:
 ```nim
 class(Base[T]):
   ctor(newBase) proc(xInit: T)
-
   var x = xInit
-
   proc getT*(): T = x
 
 
@@ -170,6 +168,9 @@ block:
 ```
 
 A nice property of using closures is that it is not necessary to repeat generic params for all methods.
+However there is also a drawback:
+Closures cannot be generic, and therefore the class methods cannot take their own generic params.
+This is similar to Nim's standard `method`s, where "generic methods not attachable to base" are deprecated.
 
 Generics are still WIP, probably the following syntax is required to map generic params from a subclass to its base class:
 
