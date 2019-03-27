@@ -148,6 +148,34 @@ The `base` symbol allows to make explicit calls to the base class, i.e., if the
 class overloads `someMethod`, it could call `base.someMethod` in the implementation
 of `self.someMethod`.
 
+### Generics
+
+The syntax for generic classes is:
+
+```nim
+class(Base[T]):
+  ctor(newBase) proc(xInit: T)
+
+  var x = xInit
+
+  proc getT*(): T = x
+
+
+block:
+  let x = newBase(42)
+  doAssert x.getT() == 42
+```
+
+A nice property of using closures is that it is not necessary to repeat generic params for all methods.
+
+Generics are still WIP, probably the following syntax is required to map generic params from a subclass to its base class:
+
+```nim
+classOfGeneric(Sub[X], Base, Base[A, X, B]):
+  # ...
+```
+
+
 ## DSL rules
 
 The macro supports the following syntax within the body of `class`/`classOf`.
