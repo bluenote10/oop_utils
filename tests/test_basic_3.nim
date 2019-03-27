@@ -21,9 +21,9 @@ classOf(DoubleCounter, Counter):
 
   var counter = 100
 
-  proc inc*() = counter += 2
-  proc dec*() = counter -= 2
-  proc get*(): int = counter
+  proc inc*() {.override.} = counter += 2
+  proc dec*() {.override.} = counter -= 2
+  proc get*() : int {.override.} = counter
 
 block:
   let counter: Counter = newDoubleCounter()
@@ -40,8 +40,8 @@ when false:
 
   classOf(X, AbstractInterface):
     base()
-    proc toImplementA*(): string = "A"
-    proc toImplementB*(): string = "B"
+    proc toImplementA*(): string {.override.} = "A"
+    proc toImplementB*(): string {.override.} = "B"
 
   block:
     let x = X.init()
@@ -57,8 +57,8 @@ when true:
 
   classOf(X, AbstractInterface):
     base("x_prefix_")
-    proc toImplementA*(): string = "A"
-    proc toImplementB*(): string = "B"
+    proc toImplementA*(): string {.override.} = "A"
+    proc toImplementB*(): string {.override.} = "B"
 
   block:
     let x = X.init()

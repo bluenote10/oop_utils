@@ -6,7 +6,7 @@ class(Abstract):
 
 classOf(Impl, Abstract):
   ctor(newImpl)
-  proc id*(): string = "impl"
+  proc id*(): string {.override.} = "impl"
 
 block:
   let a: Abstract = newImpl()
@@ -25,11 +25,11 @@ classOf(StillAbstract, AbstractWithInit):
 classOf(A, AbstractWithInit):
   ctor proc(x: int)
   base(x)
-  proc abstract*(): int = 5
+  proc abstract*(): int {.override.} = 5
 
 classOf(B, StillAbstract):
   base() # TODO: get rid of empty base call
-  proc abstract*(): int = 6
+  proc abstract*(): int {.override.} = 6
 
 block:
   let a = A.init(20)

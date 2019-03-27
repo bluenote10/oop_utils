@@ -22,7 +22,7 @@ The design decision to model methods as closures comes at the price that every d
     class(UiComponent):
       var state: SomeRenderState
       # (abstract) methods...
-    
+
     classOf(UiCheckboxComponent, UiComponent):
       var state: bool # doesn't matter that a parent also uses `state`
       # methods...
@@ -57,7 +57,7 @@ class(Counter):
   ctor(newCounter) proc(init: int)
 
   var counter = init
-  
+
   getter[int](counter)
   setter[int](counter)
   # or as a shortcut for the two:
@@ -78,15 +78,18 @@ classOf(DoubleCounter, Counter):
 
   var counter = 100
 
-  proc inc*() = counter += 2
-  proc dec*() = counter -= 2
-  proc get*(): int = counter
+  proc inc*() {.override.} = counter += 2
+  proc dec*() {.override.} = counter -= 2
+  proc get*(): int {.override.} = counter
 
 block:
   let counter: Counter = newDoubleCounter()
   counter.inc()
   echo counter.get()
 ```
+
+The `{.override.}` indicates that we want to override a base method.
+Similar to C++, the macro checks that `{.override.}` is used if and only if there is an override.
 
 **Note on constructors**: If the constructor does not take parameters, we can omit the `proc` part.
 In fact, the macro also generates generic constructors according to [Nim RFC 48](https://github.com/nim-lang/RFCs/issues/48) automatically and we could construct the object like this:
@@ -118,9 +121,9 @@ If a proc has no body, the macro treats it as abstract. If a class has abstract 
 ```nim
 classOf(X, AbstractInterface):
   base()
-  proc toImplementA*(): string = "A"
-  proc toImplementB*(): string = "B"
-  
+  proc toImplementA*(): string {.override.} = "A"
+  proc toImplementB*(): string {.override.} = "B"
+
 block:
   let x = X.init()
   doAssert x.compute() == "AB"
@@ -139,11 +142,11 @@ class(AbstractInterface):
 
 classOf(X, AbstractInterface):
   base("x_prefix_")
-  proc toImplementA*(): string = "A"
-  proc toImplementB*(): string = "B"
+  proc toImplementA*(): string {.override.} = "A"
+  proc toImplementB*(): string {.override.} = "B"
 ```
 
-When there is a base class, the macro injects a symbol `base` similar to `self`. 
+When there is a base class, the macro injects a symbol `base` similar to `self`.
 The `base` symbol allows to make explicit calls to the base class, i.e., if the
 class overloads `someMethod`, it could call `base.someMethod` in the implementation
 of `self.someMethod`.
@@ -229,8 +232,8 @@ getterSetter[T](field, getterMethodName, setterMethodName)
 To get an idea of what the macro is generating, this is the code produced from the `AbstractInterface` example (slightly edited):
 
 ```nim
-# The base class: Because it is abstract, the macro only generate 
-# the type and `patch` function, which is kind of an internal 
+# The base class: Because it is abstract, the macro only generate
+# the type and `patch` function, which is kind of an internal
 # constructor.
 type
   AbstractInterface* = ref object of RootObj
@@ -254,7 +257,7 @@ proc patch*(self: AbstractInterface): proc (prefix: string) =
 # Now the derived type...
 type
   X* = ref object of AbstractInterface
-  
+
 proc patch*(self: X): proc () =
   result = proc () =
     # Note that this calls the `patch` proc above, which
@@ -262,14 +265,14 @@ proc patch*(self: X): proc () =
     # class. In particular, this sets `self.compute`
     # properly
     patch(AbstractInterface(self))("x_prefix_")
-    
+
     # The macro injects a `base` symbol similar to `self`
     # to allow explicit base calls
     var base = AbstractInterface()
     base.toImplementA = self.toImplementA
     base.toImplementB = self.toImplementB
     base.compute = self.compute
-    
+
     # Now come the actual overloads
     self.toImplementA = proc (): string =
       "A"

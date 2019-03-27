@@ -35,9 +35,9 @@ classOf(HackedPerson, Person):
 
   var age = initAge.float
 
-  proc getAge*(): int = age.int
+  proc getAge*(): int {.override.} = age.int
 
-  proc getOlder*() =
+  proc getOlder*() {.override.} =
     age += 0.5
 
 block:

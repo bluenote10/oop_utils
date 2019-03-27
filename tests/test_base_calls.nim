@@ -10,13 +10,13 @@ classOf(Sub, Base):
   ctor(newSub)
   base()
   let s = "sub"
-  proc id*(): string = &"{base.id()}.{s}"
+  proc id*(): string {.override.} = &"{base.id()}.{s}"
 
 classOf(SubSub, Sub):
   ctor(newSubSub)
   base()
   let s = "subsub"
-  proc id*(): string = &"{base.id()}.{s}"
+  proc id*(): string {.override.} = &"{base.id()}.{s}"
 
 block:
   let a = newBase()

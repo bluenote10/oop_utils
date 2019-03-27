@@ -37,6 +37,15 @@ proc `procBody=`(n: NimNode, other: NimNode) =
   expectKind other, nnkStmtList
   n[n.len - 1] = other
 
+proc genericParams(n: NimNode): NimNode =
+  expectKinds n, {nnkProcDef}
+  n[2]
+
+proc `genericParams=`(n: NimNode, other: NimNode) =
+  expectKinds n, {nnkProcDef, nnkLambda}
+  expectKind other, nnkGenericParams
+  n[2] = other
+
 proc formalParams(n: NimNode): NimNode =
   expectKinds n, {nnkProcDef, nnkLambda}
   n[3]
@@ -46,14 +55,14 @@ proc `formalParams=`(n: NimNode, other: NimNode) =
   expectKind other, nnkFormalParams
   n[3] = other
 
-proc genericParams(n: NimNode): NimNode =
-  expectKinds n, {nnkProcDef}
-  n[2]
-
-proc `genericParams=`(n: NimNode, other: NimNode) =
+proc pragmas(n: NimNode): NimNode =
   expectKinds n, {nnkProcDef, nnkLambda}
-  expectKind other, nnkGenericParams
-  n[2] = other
+  n[4]
+
+proc `pragmas=`(n: NimNode, other: NimNode) =
+  expectKinds n, {nnkProcDef, nnkLambda}
+  expectKind other, nnkPragma
+  n[4] = other
 
 proc publicIdent(s: string): NimNode =
   newNimNode(nnkPostfix).add(
@@ -225,6 +234,7 @@ type
     name: string
     procDef: NimNode
     isAbstract: bool
+    isOverride: bool
     fieldDef: NimNode
 
   PrivateProc = ref object of ParsedProc
@@ -250,11 +260,19 @@ proc convertProcDefIntoField(procdef: NimNode, isAbstract: bool): NimNode =
   result = newIdentDefs(field, fieldType)
 
 
+proc findPragma(n: NimNode, pragma: string): bool =
+  for child in n:
+    if child.kind == nnkIdent and child.strVal == pragma:
+      return true
+  return false
+
+
 proc parseProcDef(procDef: NimNode): ParsedProc =
   expectKind procDef, nnkProcDef
   if procDef[0].kind == nnkPostfix and procDef[0][0].strVal == "*":
     let name = procDef[0][1].strVal
     let isAbstract = procDef.body.kind == nnkEmpty
+    let isOverride = procDef.pragmas.findPragma("override")
     let transformedProcDef = procDef.copyNimTree()
 
     # transform 1: get rid of postfix export "*"
@@ -271,12 +289,13 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
       name: name,
       procDef: transformedProcDef,
       isAbstract: isAbstract,
+      isOverride: isOverride,
       fieldDef: convertProcDefIntoField(transformedProcDef, isAbstract)
     )
   else:
     result = PrivateProc(
       name: procDef[0].strVal,
-      procDef: procDef.copyNimTree(),
+      procDef: procDef, # .copyNimTree(),
     )
 
 # -----------------------------------------------------------------------------
@@ -342,9 +361,13 @@ proc compareProcs(baseProcs: seq[BaseProc], exportedProcs: seq[ExportedProc]): O
     if exportedProc.isAbstract:
       result.isAbstract = true
     if baseProcsNameSet.contains(exportedProc.name):
+      if not exportedProc.isOverride:
+        error &"Method '{exportedProc.name}' needs {{.override.}} pragma.", exportedProc.procDef
       result.overloadedProcs.add(exportedProc)
       overloadedProcsNameSet.incl(exportedProc.name)
     else:
+      if exportedProc.isOverride:
+        error &"Method '{exportedProc.name}' has {{.override.}} pragma, but doesn't override anything.", exportedProc.procDef
       result.newProcs.add(exportedProc)
 
   # compute remaining base procs

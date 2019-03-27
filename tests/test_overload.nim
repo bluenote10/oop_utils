@@ -15,7 +15,7 @@ classOf(Child, Base):
 
   var state = "child"
 
-  proc getState*(): string = state
+  proc getState*(): string {.override.} = state
 
 
 block:
