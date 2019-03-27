@@ -8,7 +8,7 @@ It is based on a basic design decision:
 The library was written with the JS target in mind, but works fine on C/C++ targets as well.
 
 The design decision to model methods as closures comes at the price that every data access has to go through getters/setters. On the other hand, it has a few interesting properties:
-- The direct consequence: Full encapsulation. In contract to regular object fields it is much easier to expose only what has to be exposed.
+- The direct consequence: Full encapsulation. In contrast to regular object fields it is much easier to expose only what has to be exposed.
 - Internal state can be split into mutable/immutable via `var`/`let` bindings. For example
     ```nim
     class(Person):
@@ -24,7 +24,7 @@ The design decision to model methods as closures comes at the price that every d
       # (abstract) methods...
     
     classOf(UiCheckboxComponent, UiComponent):
-      var state: bool # doesn't matter that a parent also needs `state`
+      var state: bool # doesn't matter that a parent also uses `state`
       # methods...
     ```
 
@@ -111,9 +111,9 @@ class(AbstractInterface):
     self.toImplementA() & self.toImplementB()
 ```
 
-If a proc has no body, the macro treats it as abstract. If a class has abstract methods, the entire class is considered abstract, and there won't be public constructors (the macro will reject attempts to create a named constructor). The following class is non-abstract, because it overloads all abstract base methods:
+Note: `self` is the symbol injected by the macro that refers to the class instance, and has to be used to call methods from other methods.
 
-Note: `self` is the symbol injected by the macro that refers to the class instance, and has to be used to call a methods from another method.
+If a proc has no body, the macro treats it as abstract. If a class has abstract methods, the entire class is considered abstract, and there won't be public constructors (the macro will reject attempts to create a named constructor). The following class is non-abstract, because it overloads all abstract base methods:
 
 ```nim
 classOf(X, AbstractInterface):
