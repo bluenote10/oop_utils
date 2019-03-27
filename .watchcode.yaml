@@ -12,12 +12,12 @@ tasks:
   default:
     fileset: default
     commands:
-      #- "nim -r c ./tests/test_basic_2.nim"
+      - "nim -r c ./tests/test_basic_3.nim"
       #- "nim -r c ./tests/test_inheritance_chain.nim"
       #- "nim -r c ./tests/test_overload.nim"
       #- "nim -r c ./tests/test_empty_ctor.nim"
       #- "nim -r c ./tests/test_base_calls.nim"
-      - "nim -r c ./tests/test_abstract.nim"
+      #- "nim -r c ./tests/test_abstract.nim"
       #- "nim -r c ./tests/test_generic_constructor.nim"
       #- "nim -r c ./tests/test_generics_1.nim"
 
