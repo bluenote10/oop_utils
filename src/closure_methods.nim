@@ -438,9 +438,10 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
   )
 
   # main proc def
+  let selfIdent = genSym(nskParam, "self")
   result = newProc(
     publicIdent("patch"),
-    [returnType, newIdentDefs(ident "self", classDef.rawClassDef)],
+    [returnType, newIdentDefs(selfIdent, classDef.rawClassDef)],
   )
 
   # attach generic params
@@ -458,14 +459,14 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
     let patchCallBase = newCall(
       newCall(
         ident "patch",
-        newCall(baseSymbol, ident "self"),
+        newCall(baseSymbol, selfIdent),
       )
     )
     for arg in baseCall.args:
       patchCallBase.add(arg)
     closure.procBody.add(patchCallBase)
 
-  # 2. inject base
+  # 2. inject `base` symbol
   if parsedBody.baseCall.isSome:
     closure.procBody.add(
       newVarStmt(ident "base", newNimNode(nnkObjConstr).add(baseSymbol))
@@ -474,7 +475,7 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
       closure.procBody.add(
         newAssignment(
           newDotExpr(ident "base", ident baseMethod.name),
-          newDotExpr(ident "self", ident baseMethod.name),
+          newDotExpr(selfIdent, ident baseMethod.name),
         )
       )
 
@@ -482,17 +483,24 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
   for varDef in parsedBody.varDefs:
     closure.procBody.add(varDef)
 
-  # 4. private procs
+  # 4. inject `self` symbol
+  template injectSelfTemplate(selfIdent) {.dirty.} =
+    template self(): untyped = selfIdent
+  closure.procBody.add(
+    getAst(injectSelfTemplate(selfIdent))
+  )
+
+  # 5. private procs
   for privateProc in parsedBody.privateProcs:
     closure.procBody.add(
       privateProc.procDef
     )
 
-  # 5. exported procs
+  # 6. exported procs
   for exportedProc in parsedBody.exportedProcs:
     closure.procBody.add(
       newAssignment(
-        newDotExpr(ident "self", ident exportedProc.name),
+        newDotExpr(selfIdent, ident exportedProc.name),
         convertProcDefIntoLambda(exportedProc.procDef),
       )
     )
@@ -554,7 +562,7 @@ proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor, parsedBod
   result.formalParams.add(classDef.rawClassDef) # return type
   result.formalParams.add(
     newIdentDefs(
-      genSym(nskParam),
+      genSym(nskParam, "T"),
       newNimNode(nnkBracketExpr).add(
         ident "typedesc",
         classDef.identClass,

@@ -26,8 +26,8 @@ type
 proc getFiles(): seq[File] =
   result = newSeq[File]()
   for file in oswalkdir.walkDir(system.getCurrentDir() / "tests"):
-    let (_, _, ext) = file.path.splitFile()
-    if ext == ".nim" and file.kind in {oswalkdir.pcFile, oswalkdir.pcLinkToFile}:
+    let (_, name, ext) = file.path.splitFile()
+    if ext == ".nim" and name.startswith("test") and file.kind in {oswalkdir.pcFile, oswalkdir.pcLinkToFile}:
       result.add(file)
   result.sort((a, b) => cmp(a.path, b.path))
 
@@ -49,6 +49,15 @@ let colReset = "\e[00m"
 
 hint("QuitCalled", false)
 
+proc printPassed() =
+  echo &"   {colGreen}[passed]{colReset}"
+
+proc printFailed(output: string, suffix = "") =
+  echo &"   {colRed}[failed] {suffix}{colReset}"
+  echo &"{colRed}------------------------------------------------{colReset}"
+  echo output
+  echo &"{colRed}------------------------------------------------{colReset}"
+
 task test, "Runs the test suite":
   ## Executes all tests.
   var files = getFiles()
@@ -65,21 +74,36 @@ task test, "Runs the test suite":
 
   for file in files:
     let (_, name, _) = file.path.splitFile()
-    if name.startswith("test"):
+    let expectedError = name.startswith("testerror")
 
-      echo &" * {colYellow}{file.path.extractFilename}{colReset}"
-      let ret = gorgeEx &"nim -r -d:release --colors:on {compiler} {file.path}"
-      deleteRunnable(file, mode)
+    echo &" * {colYellow}{file.path.extractFilename}{colReset}"
+    let ret = gorgeEx &"nim -r -d:release --colors:on {compiler} {file.path}"
+    deleteRunnable(file, mode)
 
+    if not expectedError:
       if ret.exitCode == 0:
-        echo &"   {colGreen}[passed]{colReset}"
+        printPassed()
         numPassed += 1
       else:
         numFailed += 1
-        echo &"   {colRed}[failed]{colReset}"
-        echo &"{colRed}------------------------------------------------{colReset}"
-        echo ret.output
-        echo &"{colRed}------------------------------------------------{colReset}"
+        printFailed(ret.output)
+    else:
+      if ret.exitCode == 0:
+        printFailed(ret.output, "test expected to fail, but passed")
+        numFailed += 1
+      else:
+        var expectedMessage: string
+        var i = 0
+        for line in staticRead(file.path).splitLines():
+          if i == 1:
+            expectedMessage = line.strip()
+          inc i
+        if ret.output.contains(expectedMessage):
+          numPassed += 1
+          printPassed()
+        else:
+          numFailed += 1
+          printFailed(ret.output, &"missing error message '{expectedMessage}'")
 
   if numFailed == 0:
     echo &"\n{colGreen}Success{colReset}: All {numPassed} tests passed."
