@@ -23,7 +23,7 @@ The design decision to model methods as closures comes at the price that every d
       var state: SomeRenderState
       # (abstract) methods...
 
-    classOf(UiCheckboxComponent, UiComponent):
+    class(UiCheckboxComponent of UiComponent):
       var state: bool # doesn't matter that a parent also uses `state`
       # methods...
     ```
@@ -70,10 +70,10 @@ It is also possible to use `getter[int](counter, myCustomGetter)` or `getterSett
 
 ### Derived class
 
-Derived classes are created with the `classOf` variant of the macro to specify the base type:
+Derived classes can be created using the `Sub of Base` syntax:
 
 ```nim
-classOf(DoubleCounter, Counter):
+class(DoubleCounter of Counter):
   ctor(newDoubleCounter)
 
   var counter = 100
@@ -119,7 +119,7 @@ Note: `self` is the symbol injected by the macro that refers to the class instan
 If a proc has no body, the macro treats it as abstract. If a class has abstract methods, the entire class is considered abstract, and there won't be public constructors (the macro will reject attempts to create a named constructor). The following class is non-abstract, because it overloads all abstract base methods:
 
 ```nim
-classOf(X, AbstractInterface):
+class(X of AbstractInterface):
   base()
   proc toImplementA*(): string {.override.} = "A"
   proc toImplementB*(): string {.override.} = "B"
@@ -140,7 +140,7 @@ class(AbstractInterface):
   proc compute*(): string =
     prefix & self.toImplementA() & self.toImplementB()
 
-classOf(X, AbstractInterface):
+class(X of AbstractInterface):
   base("x_prefix_")
   proc toImplementA*(): string {.override.} = "A"
   proc toImplementB*(): string {.override.} = "B"
@@ -171,17 +171,17 @@ However there is also a drawback:
 Closures cannot be generic, and therefore the class methods cannot take their own generic params.
 This is similar to Nim's standard `method`s, where "generic methods not attachable to base" are deprecated.
 
-Generics are still WIP, probably the following syntax is required to map generic params from a subclass to its base class:
+Generics are still WIP, for example I still want to add support for mapping generic types from sub to base classes like:
 
 ```nim
-classOfGeneric(Sub[X], Base, Base[A, X, B]):
+class(Sub[X] of Base[A, X, B]):
   # ...
 ```
 
 
 ## DSL rules
 
-The macro supports the following syntax within the body of `class`/`classOf`.
+The macro supports the following syntax within the body of `class`.
 
 #### 1. Constructor
 

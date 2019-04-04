@@ -6,13 +6,13 @@ class(Base):
   let s = "base"
   proc id*(): string = s
 
-classOf(Sub, Base):
+class(Sub of Base):
   ctor(newSub)
   base()
   let s = "sub"
   proc id*(): string {.override.} = &"{base.id()}.{s}"
 
-classOf(SubSub, Sub):
+class(SubSub of Sub):
   ctor(newSubSub)
   base()
   let s = "subsub"

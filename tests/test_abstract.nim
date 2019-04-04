@@ -4,7 +4,7 @@ import strformat
 class(Abstract):
   proc id*(): string
 
-classOf(Impl, Abstract):
+class(Impl of Abstract):
   ctor(newImpl)
   proc id*(): string {.override.} = "impl"
 
@@ -19,15 +19,15 @@ class(AbstractWithInit):
   proc abstract*(): int
   proc compute*(): int = self.abstract() + x
 
-classOf(StillAbstract, AbstractWithInit):
+class(StillAbstract of AbstractWithInit):
   base(10)
 
-classOf(A, AbstractWithInit):
+class(A of AbstractWithInit):
   ctor proc(x: int)
   base(x)
   proc abstract*(): int {.override.} = 5
 
-classOf(B, StillAbstract):
+class(B of StillAbstract):
   base() # TODO: get rid of empty base call
   proc abstract*(): int {.override.} = 6
 

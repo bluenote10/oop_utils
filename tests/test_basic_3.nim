@@ -16,7 +16,7 @@ block:
   echo counter.get()
 
 
-classOf(DoubleCounter, Counter):
+class(DoubleCounter of Counter):
   ctor(newDoubleCounter)
 
   var counter = 100
@@ -38,7 +38,7 @@ when false:
     proc compute*(): string =
       self.toImplementA() & self.toImplementB()
 
-  classOf(X, AbstractInterface):
+  class(X of AbstractInterface):
     base()
     proc toImplementA*(): string {.override.} = "A"
     proc toImplementB*(): string {.override.} = "B"
@@ -55,7 +55,7 @@ when true:
     proc compute*(): string =
       prefix & self.toImplementA() & self.toImplementB()
 
-  classOf(X, AbstractInterface):
+  class(X of AbstractInterface):
     base("x_prefix_")
     proc toImplementA*(): string {.override.} = "A"
     proc toImplementB*(): string {.override.} = "B"

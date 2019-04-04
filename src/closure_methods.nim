@@ -647,7 +647,7 @@ proc preprocessBody(body: NimNode) =
 # Main class macro impl
 # -----------------------------------------------------------------------------
 
-proc classImpl(definition, base, body: NimNode): NimNode =
+macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
   result = newStmtList()
   echo "-----------------------------------------------------------------------"
@@ -710,12 +710,21 @@ proc classImpl(definition, base, body: NimNode): NimNode =
 
 macro class*(definition: untyped, body: untyped): untyped =
   ## Class definition that derives from RootObj.
-  let base = getType(typedesc[RootObj])
-  result = classImpl(definition, base, body)
-
-macro classOf*(definition: untyped, base: typed, body: untyped): untyped =
-  ## Class defintio that allows to specify a base class.
-  result = classImpl(definition, base, body)
+  if definition.kind == nnkInfix and definition[0].strVal == "of":
+    result = newCall(
+      bindSym "classImpl",
+      definition[1],
+      definition[2],
+      body,
+    )
+  else:
+    let base = getType(typedesc[RootObj])
+    result = newCall(
+      bindSym "classImpl",
+      definition,
+      base,
+      body,
+    )
 
 # -----------------------------------------------------------------------------
 # Dev sandbox

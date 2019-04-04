@@ -10,43 +10,43 @@ class(Base):
   proc add*(value: int): int =
     x + value
 
-classOf(A, Base):
+class(A of Base):
   ctor(newA)
   base(1)
 
-classOf(B, Base):
+class(B of Base):
   ctor(newB)
   base(2)
 
-classOf(C, Base):
+class(C of Base):
   ctor(newC)
   base(3)
 
-classOf(D, Base):
+class(D of Base):
   ctor(newD)
   base(4)
 
-classOf(E, Base):
+class(E of Base):
   ctor(newE)
   base(5)
 
-classOf(F, Base):
+class(F of Base):
   ctor(newF)
   base(6)
 
-classOf(G, Base):
+class(G of Base):
   ctor(newG)
   base(7)
 
-classOf(H, Base):
+class(H of Base):
   ctor(newH)
   base(8)
 
-classOf(I, Base):
+class(I of Base):
   ctor(newI)
   base(9)
 
-classOf(J, Base):
+class(J of Base):
   ctor(newJ)
   base(10)
 

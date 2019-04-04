@@ -8,7 +8,7 @@ class(Base):
   proc getState*(): string = state
 
 
-classOf(Child, Base):
+class(Child of Base):
   ctor(newChild) proc()
 
   base("base")

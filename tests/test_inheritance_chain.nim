@@ -5,14 +5,14 @@ class(A):
 
   proc a*(): string = "a"
 
-classOf(AB, A):
+class(AB of A):
   ctor(newAB) proc()
 
   base()
 
   proc b*(): string = "b"
 
-classOf(ABC, AB):
+class(ABC of AB):
   ctor(newABC) proc()
 
   base()

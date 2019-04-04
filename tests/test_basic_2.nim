@@ -28,7 +28,7 @@ block:
 
 
 
-classOf(HackedPerson, Person):
+class(HackedPerson of Person):
   ctor(newHackedPerson) proc(name: string, initAge: int)
 
   base(name & " Cheating", initAge)
