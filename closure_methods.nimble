@@ -47,13 +47,15 @@ let colBlue = "\e[1;34m"
 let colWhite = "\e[1;37m"
 let colReset = "\e[00m"
 
+hint("QuitCalled", false)
+
 task test, "Runs the test suite":
   ## Executes all tests.
   var files = getFiles()
 
   if files.len < 1:
     echo &"{colRed}Warning{colReset}: No tests found!"
-    quit(1)
+    quit("", 1)
 
   let mode = ModeC
   let compiler = if mode == ModeC: "c" else: "js"
@@ -74,7 +76,8 @@ task test, "Runs the test suite":
         numPassed += 1
       else:
         numFailed += 1
-        echo &"{colRed}---[failed]-------------------------------------{colReset}"
+        echo &"   {colRed}[failed]{colReset}"
+        echo &"{colRed}------------------------------------------------{colReset}"
         echo ret.output
         echo &"{colRed}------------------------------------------------{colReset}"
 
@@ -82,4 +85,5 @@ task test, "Runs the test suite":
     echo &"\n{colGreen}Success{colReset}: All {numPassed} tests passed."
   else:
     echo &"\n{colRed}Failed{colReset}: {numFailed} out of {numFailed+numPassed} tests failed."
+    quit("", 1)
 
