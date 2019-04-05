@@ -213,6 +213,7 @@ proc parseConstructor(n: NimNode): Constructor =
 type
   ParsedBaseCall = ref object
     args: seq[NimNode]
+    origNode: NimNode
 
 proc isBaseCall(n: NimNode): bool =
   n.kind == nnkCall and n[0].kind == nnkIdent and n[0].strVal == "base"
@@ -221,7 +222,7 @@ proc parseBaseCall(n: NimNode): ParsedBaseCall =
   var args = newSeq[NimNode]()
   for i in 1 ..< n.len:
     args.add(n[i])
-  ParsedBaseCall(args: args)
+  ParsedBaseCall(args: args, origNode: n)
 
 # -----------------------------------------------------------------------------
 # Proc parsing
@@ -315,9 +316,7 @@ proc parseBody(body: NimNode): ParsedBody =
     ctor: none(Constructor),
   )
   for n in body:
-    if {nnkVarSection, nnkLetSection, nnkConstSection}.contains(n.kind):
-      result.varDefs.add(n.copyNimTree())
-    elif n.kind == nnkProcDef:
+    if n.kind == nnkProcDef:
       let parsedProc = parseProcDef(n)
       if parsedProc of ExportedProc:
         result.exportedProcs.add(parsedProc.ExportedProc)
@@ -334,7 +333,8 @@ proc parseBody(body: NimNode): ParsedBody =
       else:
         error "Class definition must have only one base call", n
     else:
-      error "Disallowed node in class definition:\n" & n.repr, n
+      result.varDefs.add(n.copyNimTree())
+      # error "Disallowed node in class definition:\n" & n.repr, n
 
 # -----------------------------------------------------------------------------
 # Overload analysis
@@ -462,6 +462,7 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
         newCall(baseSymbol, selfIdent),
       )
     )
+    patchCallBase.copyLineInfo(baseCall.origNode)
     for arg in baseCall.args:
       patchCallBase.add(arg)
     closure.procBody.add(patchCallBase)
