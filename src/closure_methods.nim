@@ -185,7 +185,7 @@ proc isConstructor(n: NimNode): bool =
   )
   # case2 matches ctor without arguments:
   # - ctor(named)
-  let case2 = n.kind == nnkCall and n[0].strVal == "ctor"
+  let case2 = n.kind == nnkCall and n[0].kind == nnkIdent and n[0].strVal == "ctor"
   return case1 or case2
 
 proc parseConstructor(n: NimNode): Constructor =
