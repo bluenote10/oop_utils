@@ -229,6 +229,16 @@ proc parseBaseCall(n: NimNode): ParsedBaseCall =
   ParsedBaseCall(args: args, origNode: n)
 
 # -----------------------------------------------------------------------------
+# Post init block parsing
+# -----------------------------------------------------------------------------
+
+proc isPostInitBlock(n: NimNode): bool =
+  n.kind == nnkCall and n[0].kind == nnkIdent and n[0].strVal == "postInit"
+
+proc parsePostInitBlock(n: NimNode): NimNode =
+  n[1]
+
+# -----------------------------------------------------------------------------
 # Proc parsing
 # -----------------------------------------------------------------------------
 
@@ -320,6 +330,7 @@ type
     exportedProcs: seq[ExportedProc]
     privateProcs: seq[PrivateProc]
     bodyStmts: seq[BodyStmt]
+    postInitBlock: Option[NimNode]
 
 proc parseBody(body: NimNode): ParsedBody =
   result = ParsedBody(
@@ -337,7 +348,7 @@ proc parseBody(body: NimNode): ParsedBody =
       if result.ctor.isNone:
         result.ctor = some(n.parseConstructor())
       else:
-        error "Class definition must have only one constructor", n
+        error "Class definition must have only one constructor.", n
     elif n.isBaseCall():
       if not result.hasBaseCall:
         result.hasBaseCall = true
@@ -345,7 +356,12 @@ proc parseBody(body: NimNode): ParsedBody =
           BodyStmtBaseCall(baseCall: n.parseBaseCall())
         )
       else:
-        error "Class definition must have only one base call", n
+        error "Class definition must have only one base call.", n
+    elif n.isPostInitBlock():
+      if result.postInitBlock.isNone:
+        result.postInitBlock = some(n.parsePostInitBlock)
+      else:
+        error "Class definition must have only one post init block.", n
     else:
       result.bodyStmts.add(
         BodyStmtNode(node: n.copyNimTree())
@@ -523,6 +539,10 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
         convertProcDefIntoLambda(exportedProc.procDef),
       )
     )
+
+  # 5. post init block
+  for postInitBlock in parsedBody.postInitBlock:
+    closure.procBody.add(newBlockStmt(postInitBlock))
 
   result.procBody = newStmtList()
   result.procBody.add(
