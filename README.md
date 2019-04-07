@@ -181,41 +181,77 @@ class(Sub[X] of Base[A, X, B]):
 
 ## DSL rules
 
-The macro supports the following syntax within the body of `class`.
+The body of `class` can have the following syntactical elements:
 
-#### 1. Constructor
+#### Constructor
 
 The syntax is either
 ```nim
 ctor(newX) proc(args...)
 ```
-to create a generic + a named constructor, or
+to a named constructor + create a generic `init` constructor, or
 ```nim
 ctor proc(args...)
 ```
 to create only the generic constructor.
 In the spirit of DRY, it is not necessary to put the class type itself as a return type of the `proc` -- the macro takes care of that internally.
 
-#### 2. Base call
+#### Base call
 
 A syntax of
 ```nim
 base(args)
 ```
 is transformed into a call of the base class constructor.
+Root classes do not need a base call.
+For subclasses, the base call can be omitted if and only if the subclass implements all methods of its parent classes.
+This is statically checked by the macro.
 
-#### 3. Variable definitions
+#### Initialization code (variable definitions)
 
-Any `var`/`let`/`const` statement is placed at the top of resulting closure generating function.
+Arbitrary code is forward directly to the top of the resulting closure generating function.
+The main purpose is to introduce `var`/`let`/`const` symbols that hold internal state of a class and are accessible from the class methods.
 
-#### 4. Procs
+The base call can be placed at an arbitrary point in the initialization code.
+The `base` symbol is only defined after the `base` call.
+
+Note: The macro ensures that the `self` symbol is not yet available during initialization.
+Otherwise there would be a chicken-and-egg problem:
+- The definition of `self.someMethod` needs the variable section to be defined first in order to close over the necessary variables.
+- If we would want to call `self.someMethod` in the variable section, the methods would have to be defined first.
+
+For that reason the macro generates code in the order:
+1. Initialization (variable definitions, base call, ...)
+2. Procs definitions
+3. A `postInit` block (see below)
+
+#### Post initialization block
+
+In cases where it is convenient to run e.g. `self.initialize` during construction a `postInit` block can be used.
+The macro internally places this block at the bottom of the resulting constructor code,
+which means that the block cannot define variables accessible in methods. For example:
+
+```nim
+class(Counter):
+  var count: int
+
+  # Let's assume the `self.reset()` logic is non-trivial
+  # and we would like to make use of it in the constructor.
+  postInit:
+    self.reset()
+
+  proc reset*() =
+    count = 0
+```
+
+#### Procs
 
 Procs can be devided into:
 - procs without an export `*`: These private procs are places below the variable definitions in the resulting closure generating function.
 - procs with an export `*` and body: These are regular "methods". They will be turned into object fields and are available as `self.methodName`.
 - procs with an export `*` but no body: These are abstract methods.
 
-#### 5. Getter/Setter
+#### Getter/Setter
 
 As a convenience the following syntax is supported to easily access internal state:
 ```nim
@@ -229,7 +265,8 @@ getterSetter[T](field, getterMethodName, setterMethodName)
 
 ### Under the hood
 
-To get an idea of what the macro is generating, this is the code produced from the `AbstractInterface` example (slightly edited):
+To get an idea of what the macro is generating, this is the code produced from the `AbstractInterface` example
+(slightly edited and slighty outdated, because it doesn't show the hiding of the `self` symbol during variable definition):
 
 ```nim
 # The base class: Because it is abstract, the macro only generate
