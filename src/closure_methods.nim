@@ -131,9 +131,9 @@ proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[BaseProc]) =
           isAbstract: true,
         ))
       else:
-        error &"Unexpected node in base rec list:{nameNode.repr}"
+        error &"Unexpected node in base rec list:{nameNode.repr}", nameNode
     else:
-      error &"Expected nnkIdentDefs, got {identDef.repr}"
+      error &"Expected nnkIdentDefs, got {identDef.repr}", identDef
 
 # -----------------------------------------------------------------------------
 # Class name parsing (mainly needed to split generic params)
@@ -162,7 +162,7 @@ proc parseClassName(classDef: ClassDef, n: NimNode) =
     classDef.identClass = identClass
     classDef.genericParams = genericParams
   else:
-    error &"Cannot parse class definition: {n.repr}"
+    error &"Cannot parse class definition: {n.repr}", n
 
 proc parseDefinition(n: NimNode): ClassDef =
   result = ClassDef()
@@ -704,10 +704,12 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
   # Post parse verifications here
   for ctor in parsedBody.ctor:
     if ctor.name.isSome and overloadInfo.isAbstract:
-      error &"Class '{classDef.name}' cannot have a named constructor '{ctor.name.get}' because it is abstract."
+      error &"Class '{classDef.name}' cannot have a named constructor '{ctor.name.get}' because it is abstract.", body
 
   if not overloadInfo.isFullyOverloaded and not parsedBody.hasBaseCall:
-    error &"Class '{classDef.name}' needs to have a base(...) call because it doesn't overload all parent methods."
+    error &"Class '{classDef.name}' needs to have a base(...) call because it doesn't overload all parent methods.", body
+  if parsedBody.hasBaseCall and baseSymbol.strVal == "RootObj":
+    error &"Class '{classDef.name}' cannot have base call, because it is a root class.", body
 
   let ctor = parsedBody.ctor.get(Constructor(name: none(string), args: @[]))
 
