@@ -2,7 +2,7 @@ import closure_methods
 
 var global = ""
 
-closure_methods.class(Test):
+class(Test):
   ctor(newTest)
 
   echo "initializing"

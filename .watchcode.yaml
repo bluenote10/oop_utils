@@ -20,8 +20,8 @@ tasks:
       #- "nim -r c ./tests/test_abstract.nim"
       #- "nim -r c ./tests/test_generic_constructor.nim"
       #- "nim -r c ./tests/test_generics_1.nim"
-      #- "nim -r c ./tests/test_ctor_calls.nim"
-      - "nim -r c ./tests/test_match_instance.nim"
+      - "nim -r c ./tests/test_ctor_calls_2.nim"
+      #- "nim -r c ./tests/test_match_instance.nim"
 
       #- "nim -r js ./benchmarks/basic_dispatch_methods.nim"
       #- "nim -r js ./benchmarks/basic_dispatch_closures.nim"

@@ -5,6 +5,10 @@ import sets
 import strutils
 import sequtils
 
+import closure_methods/match_instance
+
+export match_instance
+
 # -----------------------------------------------------------------------------
 # Misc publics
 # -----------------------------------------------------------------------------
@@ -304,15 +308,22 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
 # -----------------------------------------------------------------------------
 
 type
+  BodyStmt = ref object of RootObj
+  BodyStmtNode = ref object of BodyStmt
+    node: NimNode
+  BodyStmtBaseCall = ref object of BodyStmt
+    baseCall: ParsedBaseCall
+
   ParsedBody = ref object
+    hasBaseCall: bool
     ctor: Option[Constructor]
-    baseCall: Option[ParsedBaseCall]
     exportedProcs: seq[ExportedProc]
     privateProcs: seq[PrivateProc]
-    varDefs: seq[NimNode]
+    bodyStmts: seq[BodyStmt]
 
 proc parseBody(body: NimNode): ParsedBody =
   result = ParsedBody(
+    hasBaseCall: false,
     ctor: none(Constructor),
   )
   for n in body:
@@ -328,12 +339,17 @@ proc parseBody(body: NimNode): ParsedBody =
       else:
         error "Class definition must have only one constructor", n
     elif n.isBaseCall():
-      if result.baseCall.isNone:
-        result.baseCall = some(n.parseBaseCall())
+      if not result.hasBaseCall:
+        result.hasBaseCall = true
+        result.bodyStmts.add(
+          BodyStmtBaseCall(baseCall: n.parseBaseCall())
+        )
       else:
         error "Class definition must have only one base call", n
     else:
-      result.varDefs.add(n.copyNimTree())
+      result.bodyStmts.add(
+        BodyStmtNode(node: n.copyNimTree())
+      )
       # error "Disallowed node in class definition:\n" & n.repr, n
 
 # -----------------------------------------------------------------------------
@@ -454,50 +470,52 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
   let closure = newLambda()
   closure[3] = ctorFormalParams
 
-  # 1. parent constructor impl call
-  for baseCall in parsedBody.baseCall:
-    let patchCallBase = newCall(
-      newCall(
-        ident "patch",
-        newCall(baseSymbol, selfIdent),
-      )
-    )
-    patchCallBase.copyLineInfo(baseCall.origNode)
-    for arg in baseCall.args:
-      patchCallBase.add(arg)
-    closure.procBody.add(patchCallBase)
-
-  # 2. inject `base` symbol
-  if parsedBody.baseCall.isSome:
-    closure.procBody.add(
-      newVarStmt(ident "base", newNimNode(nnkObjConstr).add(baseSymbol))
-    )
-    for baseMethod in baseMethods:
-      closure.procBody.add(
-        newAssignment(
-          newDotExpr(ident "base", ident baseMethod.name),
-          newDotExpr(selfIdent, ident baseMethod.name),
+  # 1. ctor body (base call + var defs + init code)
+  for bodyStmt in parsedBody.bodyStmts:
+    matchInstance:
+      case bodyStmt:
+      of BodyStmtNode:
+        closure.procBody.add(bodyStmt.node)
+      of BodyStmtBaseCall:
+        let baseCall = bodyStmt.baseCall
+        # make base call
+        let patchCallBase = newCall(
+          newCall(
+            ident "patch",
+            newCall(baseSymbol, selfIdent),
+          )
         )
-      )
+        patchCallBase.copyLineInfo(baseCall.origNode)
+        for arg in baseCall.args:
+          patchCallBase.add(arg)
+        closure.procBody.add(patchCallBase)
 
-  # 3. var defs
-  for varDef in parsedBody.varDefs:
-    closure.procBody.add(varDef)
+        # inject base symbol
+        closure.procBody.add(
+          newVarStmt(ident "base", newNimNode(nnkObjConstr).add(baseSymbol))
+        )
+        for baseMethod in baseMethods:
+          closure.procBody.add(
+            newAssignment(
+              newDotExpr(ident "base", ident baseMethod.name),
+              newDotExpr(selfIdent, ident baseMethod.name),
+            )
+          )
 
-  # 4. inject `self` symbol
+  # 2. inject `self` symbol
   template injectSelfTemplate(selfIdent) {.dirty.} =
     template self(): untyped = selfIdent
   closure.procBody.add(
     getAst(injectSelfTemplate(selfIdent))
   )
 
-  # 5. private procs
+  # 3. private procs
   for privateProc in parsedBody.privateProcs:
     closure.procBody.add(
       privateProc.procDef
     )
 
-  # 6. exported procs
+  # 4. exported procs
   for exportedProc in parsedBody.exportedProcs:
     closure.procBody.add(
       newAssignment(
@@ -688,7 +706,7 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
     if ctor.name.isSome and overloadInfo.isAbstract:
       error &"Class '{classDef.name}' cannot have a named constructor '{ctor.name.get}' because it is abstract."
 
-  if not overloadInfo.isFullyOverloaded and parsedBody.baseCall.isNone:
+  if not overloadInfo.isFullyOverloaded and not parsedBody.hasBaseCall:
     error &"Class '{classDef.name}' needs to have a base(...) call because it doesn't overload all parent methods."
 
   let ctor = parsedBody.ctor.get(Constructor(name: none(string), args: @[]))
