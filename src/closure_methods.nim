@@ -10,16 +10,10 @@ import closure_methods/match_instance
 export match_instance
 
 # -----------------------------------------------------------------------------
-# Misc publics
-# -----------------------------------------------------------------------------
-
-# Both doesn't work...
-# template abstractMethod* {.pragma.}
-# {.pragma: abstractMethod.}
-
-# -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
+
+template implementInfo(abstracts: seq[string], implements: seq[string]) {.pragma.}
 
 iterator items[T](o: Option[T]): T =
   if o.isSome:
@@ -95,45 +89,75 @@ proc convertProcDefIntoLambda(n: NimNode): NimNode =
 # -----------------------------------------------------------------------------
 
 type
-  BaseProc = ref object
-    name: string
-    isAbstract: bool
+  BaseAnnotation = ref object
+    abstracts: seq[string]
+    implements: seq[string]
 
-proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var seq[BaseProc]) =
+  BaseMethods = ref object
+    methodsAbstract: HashSet[string]
+    methodsImplemented: HashSet[string]
+
+iterator allMethods(baseMethods: BaseMethods): string =
+  for p in baseMethods.methodsAbstract:
+    yield p
+  for p in baseMethods.methodsImplemented:
+    yield p
+
+proc extractBaseAnnotation(n: NimNode): BaseAnnotation =
+  ## Helper functions that extracts all the abstract/implemented
+  ## methods introduced by a type.
+  # echo n.treeRepr
+  expectKind n, nnkTypeDef
+  expectKind n[0], nnkPragmaExpr
+  expectKind n[0][1], nnkPragma
+  expectKind n[0][1][0], nnkCall
+  expectKind n[0][1][0][0], nnkSym # the implementInfo symbol
+  let implementInfoNode = n[0][1][0]
+  let abstractsNode = implementInfoNode[1]
+  let implementsNode = implementInfoNode[2]
+  expectKind abstractsNode[0], nnkSym # the @ symbol
+  expectKind abstractsNode[1], nnkBracket
+  expectKind implementsNode[0], nnkSym # the @ symbol
+  expectKind implementsNode[1], nnkBracket
+  result = BaseAnnotation()
+  for strLit in abstractsNode[1]:
+    expectKind strLit, nnkStrLit
+    result.abstracts.add(strLit.strVal)
+  for strLit in implementsNode[1]:
+    expectKind strLit, nnkStrLit
+    result.implements.add(strLit.strVal)
+
+
+proc extractBaseMethods(baseSymbol: NimNode, baseMethods: var BaseMethods) =
   ## Recursively traverses over base types and collects their method fields.
-  ## TODO: collect 'abstract' custom annotation field information.
-
   let baseTypeDef = baseSymbol.getImpl
   let baseObjectTy = baseTypeDef[2][0]
   # echo baseTypeDef.treeRepr
+  # echo baseObjectTy.treeRepr
 
-  # inheritance is at ObjectTy index 1 -- recurse over parents
+  # echo baseSymbol.getImpl.treeRepr
+  # echo baseSymbol.getTypeImpl.treeRepr
+  # echo baseSymbol.getTypeInst.treeRepr
+  # echo baseSymbol.getCustomPragmaVal("implementInfo")
+  # echo baseSymbol.getTypeInst.getCustomPragmaVal("implementInfo")
+
+  # inheritance is at ObjectTy index 1 -- recurse over parent first
   if baseObjectTy.len >= 1 and baseObjectTy[1].kind == nnkOfInherit:
     let baseBaseSymbol = baseObjectTy[1][0]
     extractBaseMethods(baseBaseSymbol, baseMethods)
 
-  # reclist is at ObjectTy index 2
-  let baseRecList = if baseObjectTy.len >= 3: baseObjectTy[2] else: newEmptyNode()
-  for identDef in baseRecList:
-    if identDef.kind == nnkIdentDefs:
-      let nameNode = identDef[0]
-      let typeNode = identDef[1]
-      if nameNode.kind == nnkPostfix and nameNode.len == 2: # because of export * symbol
-        baseMethods.add(BaseProc(
-          name: nameNode[1].strVal,
-          isAbstract: false,
-        ))
-      elif nameNode.kind == nnkPragmaExpr and nameNode.len == 2 and
-           nameNode[0].kind == nnkPostfix and nameNode[0].len == 2:
-        # TODO: extract isAbstract: true
-        baseMethods.add(BaseProc(
-          name: nameNode[0][1].strVal,
-          isAbstract: true,
-        ))
-      else:
-        error &"Unexpected node in base rec list:{nameNode.repr}", nameNode
+  let baseAnnotation =
+    if baseSymbol.strVal == "RootObj":
+      BaseAnnotation()
     else:
-      error &"Expected nnkIdentDefs, got {identDef.repr}", identDef
+      extractBaseAnnotation(baseSymbol.getImpl)
+
+  for pImpl in baseAnnotation.implements:
+    baseMethods.methodsImplemented.incl(pImpl)
+    baseMethods.methodsAbstract.excl(pImpl)
+  for pAbstract in baseAnnotation.abstracts:
+    baseMethods.methodsAbstract.incl(pAbstract)
+
 
 # -----------------------------------------------------------------------------
 # Class name parsing (mainly needed to split generic params)
@@ -378,14 +402,18 @@ type
     isFullyOverloaded: bool
     newProcs: seq[ExportedProc]
     overloadedProcs: seq[ExportedProc]
-    remainingBaseProcs: seq[BaseProc]
+    remainingBaseProcs: seq[string]
 
-proc compareProcs(baseProcs: seq[BaseProc], exportedProcs: seq[ExportedProc]): OverloadInfo =
+proc overloadAnalysis(baseProcs: BaseMethods, exportedProcs: seq[ExportedProc]): OverloadInfo =
   ## Generates the overload information
   result = OverloadInfo(isAbstract: false)
 
   # helper sets
-  let baseProcsNameSet = baseProcs.mapIt(it.name).toHashSet()
+  var baseProcsNameSet = initHashSet[string]()
+  for p in baseProcs.methodsAbstract:
+    baseProcsNameSet.incl(p)
+  for p in baseProcs.methodsImplemented:
+    baseProcsNameSet.incl(p)
   var overloadedProcsNameSet = initHashSet[string]()
 
   for exportedProc in exportedProcs:
@@ -402,14 +430,13 @@ proc compareProcs(baseProcs: seq[BaseProc], exportedProcs: seq[ExportedProc]): O
         error &"Method '{exportedProc.name}' has {{.override.}} pragma, but doesn't override anything.", exportedProc.procDef
       result.newProcs.add(exportedProc)
 
-  # compute remaining base procs
-  for baseProc in baseProcs:
-    if not overloadedProcsNameSet.contains(baseProc.name):
-      result.remainingBaseProcs.add(baseProc)
-
-  # check if there are abstracts in the remaining base procs
-  for remainingBaseProc in result.remainingBaseProcs:
-    if remainingBaseProc.isAbstract:
+  # compute remaining base procs + check if there are abstracts in the remaining base procs
+  for p in baseProcs.methodsImplemented:
+    if not overloadedProcsNameSet.contains(p):
+      result.remainingBaseProcs.add(p)
+  for p in baseProcs.methodsAbstract:
+    if not overloadedProcsNameSet.contains(p):
+      result.remainingBaseProcs.add(p)
       result.isAbstract = true
 
   result.isFullyOverloaded = (result.remainingBaseProcs.len == 0)
@@ -419,27 +446,63 @@ proc compareProcs(baseProcs: seq[BaseProc], exportedProcs: seq[ExportedProc]): O
   echo "  isFullyOverloaded:  ", result.isFullyOverloaded
   echo "  newProcs:           ", result.newProcs.mapIt(it.name)
   echo "  overloadedProcs:    ", result.overloadedProcs.mapIt(it.name)
-  echo "  remainingBaseProcs: ", result.remainingBaseProcs.mapIt(it.name)
+  echo "  remainingBaseProcs: ", result.remainingBaseProcs
 
 # -----------------------------------------------------------------------------
 # Assembly of output procs
 # -----------------------------------------------------------------------------
 
-proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, newProcs: seq[ExportedProc]): NimNode =
+proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, overloadInfo: OverloadInfo): NimNode =
   # create type fields from exported methods
   let fields =
-    if newProcs.len == 0:
+    if overloadInfo.newProcs.len == 0:
       newEmptyNode()
     else:
       let reclist = newNimNode(nnkRecList)
-      for exportedProc in newProcs:
+      for exportedProc in overloadInfo.newProcs:
         reclist.add(exportedProc.fieldDef)
       reclist
+
+  # helper for the pragma expression
+  proc makeSeq(names: seq[string]): NimNode =
+    let bracket = newNimNode(nnkBracket)
+    for s in names:
+      bracket.add(newStrLitNode(s))
+    newNimNode(nnkPrefix).add(
+      ident "@",
+      bracket,
+    )
+
+  # prepare pragma expression
+  var abstracts = newSeq[string]()
+  var implements = newSeq[string]()
+  for p in overloadInfo.newProcs:
+    if p.isAbstract:
+      abstracts.add(p.name)
+    else:
+      implements.add(p.name)
+  for p in overloadInfo.overloadedProcs:
+    implements.add(p.name)
+
+  # construct pragma expression
+  # Note: Strangely, when using a pragma, the object ident actually becomes
+  # part of the pragma expression (i.e., the existance of the pragma moves
+  # the ident down a level).
+  let pragmaExpr = newNimNode(nnkPragmaExpr).add(
+    publicIdent(classDef.identClass.strVal),
+    newNimNode(nnkPragma).add(
+      newCall(
+        bindSym "implementInfo",
+        makeSeq(abstracts),
+        makeSeq(implements),
+      )
+    )
+  )
 
   # build type section
   let typeSection = newNimNode(nnkTypeSection)
   let typeDef = newNimNode(nnkTypeDef).add(
-    publicIdent(classDef.identClass.strVal),
+    pragmaExpr, # <-- usually ident goes here, but we have it wrapped in the pragma
     classDef.genericParams,
     newNimNode(nnkRefTy).add(
       newNimNode(nnkObjectTy).add(
@@ -455,7 +518,7 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, newProcs: seq[
   return typeSection
 
 
-proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNode, baseMethods: seq[BaseProc], parsedBody: ParsedBody): NimNode =
+proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNode, baseMethods: BaseMethods, parsedBody: ParsedBody): NimNode =
 
   # Copy formal params of constructor def into the closure result type.
   # Note: Closure has void return type, so add empty first child.
@@ -510,11 +573,16 @@ proc assemblePatchProc(classDef: ClassDef, ctor: Constructor, baseSymbol: NimNod
         closure.procBody.add(
           newVarStmt(ident "base", newNimNode(nnkObjConstr).add(baseSymbol))
         )
-        for baseMethod in baseMethods:
+        # Attach methods a la: `base.method = self.method`
+        # Note: We attach both implemented and abstrac methods, because even
+        # though calling `base.abstractMethod` does not make sense, it is
+        # better that the user calls the implementation with the exception
+        # instead of making an attempt to call a nil function pointer.
+        for baseMethod in baseMethods.allMethods:
           closure.procBody.add(
             newAssignment(
-              newDotExpr(ident "base", ident baseMethod.name),
-              newDotExpr(selfIdent, ident baseMethod.name),
+              newDotExpr(ident "base", ident baseMethod),
+              newDotExpr(selfIdent, ident baseMethod),
             )
           )
 
@@ -717,9 +785,12 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
   let parsedBody = parseBody(body)
 
   # recursive extraction of all base methods
-  var baseMethods = newSeq[BaseProc]()
+  var baseMethods = BaseMethods(
+    methodsAbstract: initHashSet[string](),
+    methodsImplemented: initHashSet[string](),
+  )
   extractBaseMethods(baseSymbol, baseMethods)
-  let overloadInfo = compareProcs(baseMethods, parsedBody.exportedProcs)
+  let overloadInfo = overloadAnalysis(baseMethods, parsedBody.exportedProcs)
 
   # Post parse verifications here
   for ctor in parsedBody.ctor:
@@ -733,7 +804,7 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
   let ctor = parsedBody.ctor.get(Constructor(name: none(string), args: @[]))
 
-  let typeSection = assembleTypeSection(classDef, baseSymbol, overloadInfo.newProcs)
+  let typeSection = assembleTypeSection(classDef, baseSymbol, overloadInfo)
   let patchProc = assemblePatchProc(classDef, ctor, baseSymbol, baseMethods, parsedBody)
 
   result.add(typeSection)
