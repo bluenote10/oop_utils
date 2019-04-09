@@ -281,17 +281,10 @@ type
     procDef: NimNode
 
 
-proc convertProcDefIntoField(procdef: NimNode, isAbstract: bool): NimNode =
+proc convertProcDefIntoField(procdef: NimNode): NimNode =
   # We need to turn funcName into funcName* for export
   let procIdent = procdef[0]
-  let field =
-    if not isAbstract: # custom pragma doesn't seem to work, abuse 'used'?
-      publicIdent(procIdent.strVal)
-    else:
-      newNimNode(nnkPragmaExpr).add(
-        publicIdent(procIdent.strVal),
-        newNimNode(nnkPragma).add(ident "used"),
-      )
+  let field = publicIdent(procIdent.strVal)
   let fieldType = newNimNode(nnkProcTy).add(
     procdef[3], # copy formal params
     newEmptyNode(),
@@ -329,7 +322,7 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
       procDef: transformedProcDef,
       isAbstract: isAbstract,
       isOverride: isOverride,
-      fieldDef: convertProcDefIntoField(transformedProcDef, isAbstract)
+      fieldDef: convertProcDefIntoField(transformedProcDef)
     )
   else:
     result = PrivateProc(
