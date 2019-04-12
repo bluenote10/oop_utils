@@ -21,9 +21,9 @@ when false:
 
 
 class(Base):
-  ctor(newBase) proc(xInit: int = 10) =
-    self.x* is int = xInit + 1
-    self.y+ is int = xInit + 2
+  ctor(newBase) proc(a = 10, b = 20) =
+    self.x* is int = a + 1
+    self.y+ is int = b + 2
     self.p is string = "asdf"
 
 {.pop.}
@@ -37,13 +37,13 @@ block:
 
 class(Sub of Base):
   ctor proc() =
-    base(xInit=0)
+    base(b = 200, a = 100)
     self.sub is string = "sub"
 
 block:
   let base = Sub.init()
-  doAssert base.x == 1
-  doAssert base.y == 2
+  doAssert base.x == 101
+  doAssert base.y == 202
   doAssert base.p == "asdf"
   doAssert base.sub == "sub"
 

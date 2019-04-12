@@ -79,11 +79,6 @@ proc newLambda(): NimNode =
     newStmtList(),
   )
 
-proc convertProcDefIntoLambda(n: NimNode): NimNode =
-  result = newLambda()
-  result.formalParams = n.formalParams
-  result.procBody = n.procBody
-
 proc isIdent(n: NimNode, s: string): bool =
   n.kind == nnkIdent and n.strVal == s
 
@@ -248,7 +243,7 @@ proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
         error "Class definition must have only one base call.", n
     else:
       ctor.body.add(BodyStmtNode(node: n))
-  echo ctor.repr
+  # echo ctor.repr
 
 
 proc parseConstructor(n: NimNode): Constructor =
@@ -345,24 +340,14 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, ctor: Construc
 
 proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructor): NimNode =
 
-  # Copy formal params of constructor def into the closure result type.
-  # Note: Closure has void return type, so add empty first child.
-  let ctorFormalParams = newNimNode(nnkFormalParams)
-  ctorFormalParams.add(newEmptyNode()) # void return type
-  for arg in ctor.args:
-    ctorFormalParams.add(arg)   # TODO: maybe strip default arguments
-
-  let returnType = newNimNode(nnkProcTy).add(
-    ctorFormalParams,
-    newEmptyNode(),
-  )
-
   # main proc def
   let selfIdent = ident "self"
   result = newProc(
     publicIdent("patch"),
-    [returnType, newIdentDefs(selfIdent, classDef.rawClassDef)],
+    [newEmptyNode(), newIdentDefs(selfIdent, classDef.rawClassDef)],
   )
+  for arg in ctor.args:
+    result.formalParams.add(arg)
 
   # attach generic params
   if classDef.genericParams.len > 0:
@@ -370,51 +355,31 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
     for genericParam in classDef.genericParams:
       result.genericParams.add(genericParam)
 
-  # build closure body
-  let closure = newLambda()
-  closure[3] = ctorFormalParams
-
   # 1. ctor body (base call + var defs + init code)
   for bodyStmt in ctor.body:
     matchInstance:
       case bodyStmt:
       of BodyStmtNode:
-        closure.procBody.add(bodyStmt.node)
+        result.procBody.add(bodyStmt.node)
       of BodySelfAsgn:
-        closure.procBody.add(newAssignment(
+        result.procBody.add(newAssignment(
           newDotExpr(selfIdent, ident(bodyStmt.field)),
           bodyStmt.rhs,
         ))
       of BodyStmtBaseCall:
         let baseCall = bodyStmt.baseCall
         # make base call
-        let patchCallBase = newCall(
-          newCall(
-            ident "patch",
-            newCall(baseSymbol, selfIdent),
-          )
-        )
+        let patchCallBase = newCall(ident "patch")
         patchCallBase.copyLineInfo(baseCall.origNode)
+        patchCallBase.add(newCall(baseSymbol, selfIdent))
         for arg in baseCall.args:
           patchCallBase.add(arg)
-        closure.procBody.add(patchCallBase)
+        result.procBody.add(patchCallBase)
 
-        # inject base symbol
-        closure.procBody.add(
-          newVarStmt(ident "base", newNimNode(nnkObjConstr).add(baseSymbol))
-        )
-
-  result.procBody = newStmtList()
-  result.procBody.add(
-    newAssignment(
-      ident "result",
-      closure,
-    )
-  )
   # echo "patchProc:\n", result.treeRepr
 
 
-proc assembleNamedConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constructor) =
+proc assembleConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constructor) =
   # construct self
   procDef.procBody.add(
     newVarStmt(
@@ -425,11 +390,9 @@ proc assembleNamedConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Co
 
   # call patch
   let patchCall = newCall(
-    newCall(
-      ident "patch",
-      ident "self",
-    )
+    ident "patch",
   )
+  patchCall.add(ident "self")
   for arg in ctor.args:
     patchCall.add(arg[0])
   procDef.procBody.add(patchCall)
@@ -452,7 +415,7 @@ proc assembleNamedConstructor(name: string, classDef: ClassDef, ctor: Constructo
     for genericParam in classDef.genericParams:
       result.genericParams.add(genericParam)
 
-  assembleNamedConstructorBody(result, classDef, ctor)
+  assembleConstructorBody(result, classDef, ctor)
 
 
 proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor): NimNode =
@@ -478,7 +441,7 @@ proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor): NimNode 
     for genericParam in classDef.genericParams:
       result.genericParams.add(genericParam)
 
-  assembleNamedConstructorBody(result, classDef, ctor)
+  assembleConstructorBody(result, classDef, ctor)
 
 
 # -----------------------------------------------------------------------------
@@ -519,6 +482,17 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
   result.add(typeSection)
   result.add(patchProc)
 
+  # Add accessor templates
+  template accessor(field, fieldType, selfSymbol): untyped {.dirty.} =
+    template field*(self: selfSymbol): fieldType = self.field
+  for field in ctor.fields:
+    if field.access == Access.Readable:
+      result.add(getAst(accessor(
+        ident(field.name),
+        field.typ,
+        classDef.identClass),
+      ))
+
   # Generate constructors if not abstract
   let genericConstructorProc = assembleGenericConstructor(classDef, ctor)
   result.add(genericConstructorProc)
@@ -529,7 +503,7 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
   # Take a copy as a work-around for: https://github.com/nim-lang/Nim/issues/10902
   result = result.copy
   echo result.repr
-  #echo result.treeRepr
+  # echo result.treeRepr
 
 
 # -----------------------------------------------------------------------------
