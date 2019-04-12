@@ -1,18 +1,88 @@
-import closure_methods
+import oop_utils
+
+{.push warning[Spacing]: off.}
+
+when false:
+  class(Base):
+    ctor(newBase) proc(xInit: int = 10) =
+      #self.x+: int = xInit
+      self.x* is int = xInit
+      x is int = xInit
+      #self.x+ ~> int = xInit
+      Base of Other:
+        x: int = 2  # no * possible
+      #var x*: int = xInit
+      self.init()
+
+      type
+        self = object
+          x {.private.} : int = xInit
+
+
 
 class(Base):
-  ctor(newBase) proc(xInit: int = 10)
+  ctor(newBase) proc(xInit: int = 10) =
+    self.x* is int = xInit + 1
+    self.y+ is int = xInit + 2
+    self.p is string = "asdf"
 
-  var x = xInit
+{.pop.}
+
+block:
+  let base = newBase(20)
+  doAssert base.x == 21
+  doAssert base.y == 22
+  doAssert base.p == "asdf"
+
+
+class(Sub of Base):
+  ctor proc() =
+    base(xInit=0)
+    self.sub is string = "sub"
+
+block:
+  let base = Sub.init()
+  doAssert base.x == 1
+  doAssert base.y == 2
+  doAssert base.p == "asdf"
+  doAssert base.sub == "sub"
+
+
+
+type
+  MyType = ref object
+    someField: int
+    otherField: string
+
+
+when false:
+  # Would enable autocompletion for fields, but autocompletion for methods/procs still fails
+  var self: MyType
 
   proc inc() =
-    x += 1
+    self.otherField = "asdf"
 
   proc getState*(): int =
-    inc()
-    x
+    self.inc()
+    self.x
 
+block:
+  # This should enable full autocompletion
+  # - The macro replaces Self with MyType everywhere
+  # - The macro adds forward decls for all procs to make ordering non-significant
+  type Self = MyType
+
+  proc inc(self: Self) =
+    self.otherField = "asdf"
+    #self.inc()
+
+  proc getState(self: Self): int =
+    self.inc()
+    self.someField = 1
+
+#[
 block:
   let b = newBase()
   doAssert b.getState() == 11
   doAssert b.getState() == 12
+]#
