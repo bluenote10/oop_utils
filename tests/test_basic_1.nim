@@ -26,6 +26,9 @@ class(Base):
     self.y+ is int = b + 2
     self.p is string = "asdf"
 
+  method baseMethod(z: int): int {.base.} =
+    self.x + self.y + z
+
 {.pop.}
 
 block:
@@ -48,23 +51,21 @@ block:
   doAssert base.sub == "sub"
 
 
+class(MyType):
+  ctor proc() =
+    self.someField is int = 0
+    self.otherField is string = ""
 
-type
-  MyType = ref object
-    someField: int
-    otherField: string
-
-
-when false:
+block:
   # Would enable autocompletion for fields, but autocompletion for methods/procs still fails
   var self: MyType
 
   proc inc() =
     self.otherField = "asdf"
 
-  proc getState*(): int =
-    self.inc()
-    self.x
+  proc getState(): int =
+    #self.inc()
+    self.someField
 
 block:
   # This should enable full autocompletion

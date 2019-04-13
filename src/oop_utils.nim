@@ -27,12 +27,12 @@ proc expectKinds(n: NimNode, kinds: set[NimNodeKind]) {.compileTime.} =
   if not kinds.contains(n.kind): error("Expected a node of kinds " & $kinds & ", got " & $n.kind, n)
 
 proc procBody(n: NimNode): NimNode =
-  expectKinds n, {nnkProcDef, nnkLambda}
+  expectKinds n, {nnkProcDef, nnkMethodDef, nnkLambda}
   n[n.len - 1]
 
 proc `procBody=`(n: NimNode, other: NimNode) =
-  expectKinds n, {nnkProcDef, nnkLambda}
-  expectKind other, nnkStmtList
+  expectKinds n, {nnkProcDef, nnkMethodDef, nnkLambda}
+  expectKinds other, {nnkStmtList, nnkEmpty}
   n[n.len - 1] = other
 
 proc genericParams(n: NimNode): NimNode =
@@ -45,11 +45,11 @@ proc `genericParams=`(n: NimNode, other: NimNode) =
   n[2] = other
 
 proc formalParams(n: NimNode): NimNode =
-  expectKinds n, {nnkProcDef, nnkLambda}
+  expectKinds n, {nnkProcDef, nnkMethodDef, nnkLambda}
   n[3]
 
 proc `formalParams=`(n: NimNode, other: NimNode) =
-  expectKinds n, {nnkProcDef, nnkLambda}
+  expectKinds n, {nnkProcDef, nnkMethodDef, nnkLambda}
   expectKind other, nnkFormalParams
   n[3] = other
 
@@ -272,25 +272,26 @@ proc parseConstructor(n: NimNode): Constructor =
 # Body parsing
 # -----------------------------------------------------------------------------
 
-proc parseBody(body: NimNode): Constructor =
+type
+  Func = ref object
+    node: NimNode
+
+  Body = ref object
+    ctor: Constructor
+    funcs: seq[Func]
+
+proc parseBody(body: NimNode): Body =
+  result = Body()
   var found = false
   for n in body:
     if n.isConstructor():
       if not found:
-        result = n.parseConstructor()
+        result.ctor = n.parseConstructor()
         found = true
       else:
         error "Class definition must have only one constructor.", n
-    #[
-    elif n.isBaseCall():
-      if not result.hasBaseCall:
-        result.hasBaseCall = true
-        result.bodyStmts.add(
-          BodyStmtBaseCall(baseCall: n.parseBaseCall())
-        )
-      else:
-        error "Class definition must have only one base call.", n
-    ]#
+    elif n.kind == nnkProcDef or n.kind == nnkMethodDef:
+      result.funcs.add(Func(node: n))
     else:
       error "Disallowed node in class definition:\n" & n.repr, n
 
@@ -467,7 +468,8 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
   let baseSymbol = base.getTypeInst[1]  # because its a typedesc, the type symbol is child 1
 
   # extract blocks and fields
-  let ctor = parseBody(body)
+  let body = parseBody(body)
+  let ctor = body.ctor
 
   #[
   if not overloadInfo.isFullyOverloaded and not parsedBody.hasBaseCall:
@@ -492,6 +494,19 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
         field.typ,
         classDef.identClass),
       ))
+
+  # Add funcs (forward declarations)
+  for f in body.funcs:
+    let n = f.node.copyNimTree()
+    n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
+    n.procBody = newEmptyNode()
+    result.add(n)
+
+  # Add funcs
+  for f in body.funcs:
+    let n = f.node.copyNimTree()
+    n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
+    result.add(n)
 
   # Generate constructors if not abstract
   let genericConstructorProc = assembleGenericConstructor(classDef, ctor)
