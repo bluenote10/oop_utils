@@ -12,7 +12,8 @@ tasks:
   default:
     fileset: default
     commands:
-      - "nim -r c ./tests/test_basic_1.nim"
+      - "nim -r c ./tests/standard_class/test_basic_1.nim"
+      #- "nim -r c ./tests/test_basic_1.nim"
       #- "nim -r c ./tests/test_inheritance_chain.nim"
       #- "nim -r c ./tests/test_overload.nim"
       #- "nim -r c ./tests/test_empty_ctor.nim"
