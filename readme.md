@@ -6,11 +6,14 @@ It comes in two different flavors:
 - [Standard classes](readme_standard_class.md): Allows to define type hierarchies based on Nim's standard method dispatch.
 - [Closure classes](readme_closure_class.md): Allows to define type hierarchies based on closure method dispatch.
 
-The two approaches have minor syntacical differences, but share the same general scheme. For comparison:
+The two approaches have minor syntactical differences, but share the same general scheme. For comparison:
 
 ```nim
 import oop_utils/standard_class
 
+# A standard class:
+# - The object instance is attached to a `self` symbol.
+# - Initialization + field definitions go into the ctor proc.
 class(Counter):
   ctor(newCounter) proc(init: int) =
     self.counter is int = init
@@ -25,6 +28,9 @@ vs.
 ```nim
 import oop_utils/closure_class
 
+# A closure class:
+# - No `self` symbol required.
+# - Initialization + field definitions go into main scopre to emphasize closure nature.
 class(Counter):
   ctor(newCounter) proc(init: int)
 
