@@ -3,8 +3,8 @@
 oop_utils provides macros that allow to easily create OOP class hierarchies.
 
 It comes in two different flavors:
-- [Standard classes](readme_standard_class): Allows to define type hierarchies based on Nim's standard method dispatch.
-- [Closure classes](readme_closure_class): Allows to define type hierarchies based on closure method dispatch.
+- [Standard classes](readme_standard_class.md): Allows to define type hierarchies based on Nim's standard method dispatch.
+- [Closure classes](readme_closure_class.md): Allows to define type hierarchies based on closure method dispatch.
 
 The two approaches have minor syntacical differences, but share the same general scheme. For comparison:
 
