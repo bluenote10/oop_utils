@@ -1,0 +1,3 @@
+# standard_class
+
+To be documented...

@@ -1,7 +1,6 @@
-# closure_methods [![Build Status](https://travis-ci.org/bluenote10/closure_methods.svg?branch=master)](https://travis-ci.org/bluenote10/closure_methods) [![license](https://img.shields.io/github/license/mashape/apistatus.svg)](LICENSE) <a href="https://github.com/yglukhov/nimble-tag"><img src="https://raw.githubusercontent.com/yglukhov/nimble-tag/master/nimble.png" height="23" ></a>
+# closure_class
 
-closure_methods provides a macro that allows to easily create OOP class hierarchies.
-It is based on a basic design decision:
+This approach is based on a basic design decision:
 
 > All object fields are closures
 

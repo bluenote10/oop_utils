@@ -194,7 +194,7 @@ proc parseConstructor(n: NimNode): Constructor =
   else:
     #let name = n[1].strVal
     #Constructor(name: some(name), args: @[])
-    error "not supported"
+    error "not supported", n
 
 # -----------------------------------------------------------------------------
 # Body parsing
