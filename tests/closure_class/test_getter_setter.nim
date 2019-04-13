@@ -1,4 +1,4 @@
-import closure_methods
+import oop_utils/closure_class
 
 class(X):
   ctor(newX) proc()

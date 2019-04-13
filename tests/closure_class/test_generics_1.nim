@@ -1,4 +1,4 @@
-import closure_methods
+import oop_utils/closure_class
 
 class(Base[T]):
   ctor(newBase) proc(xInit: T)

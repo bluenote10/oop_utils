@@ -5,7 +5,7 @@ import sets
 import strutils
 import sequtils
 
-import closure_methods/match_instance
+import oop_utils/match_instance
 
 export match_instance
 

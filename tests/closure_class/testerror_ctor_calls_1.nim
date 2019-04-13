@@ -1,7 +1,7 @@
 #[
 undeclared identifier: 'self'
 ]#
-import closure_methods
+import oop_utils/closure_class
 
 class(Base):
   ctor(newBase)

@@ -21,24 +21,31 @@ type
   Mode = enum
     ModeC, ModeJS
 
-  File = tuple[kind: oswalkdir.PathComponent, path: string]
+  File = string
 
-proc getFiles(): seq[File] =
+proc getFiles(baseDir: File): seq[File] =
   result = newSeq[File]()
-  for file in oswalkdir.walkDir(system.getCurrentDir() / "tests"):
-    let (_, name, ext) = file.path.splitFile()
-    if ext == ".nim" and name.startswith("test") and file.kind in {oswalkdir.pcFile, oswalkdir.pcLinkToFile}:
+  for file in oswalkdir.walkDirRec(baseDir):
+    let (_, name, ext) = file.splitFile()
+    if ext == ".nim" and name.startswith("test"):
       result.add(file)
-  result.sort((a, b) => cmp(a.path, b.path))
+  result.sort((a, b) => cmp(a, b))
 
 
 proc deleteRunnable(file: File, mode: Mode) =
   let binFileName =
     if mode == ModeC:
-      file.path.changeFileExt(ExeExt)
+      file.changeFileExt(ExeExt)
     else:
-      file.path.changeFileExt("js")
+      file.changeFileExt("js")
   rmFile(binFileName)
+
+proc relativeTo(path: File, base: File): File =
+  let baseSuffixed = base & "/"
+  if path.len > baseSuffixed.len:
+    path[baseSuffixed.len..^1]
+  else:
+    path
 
 let colRed = "\e[1;31m"
 let colGreen = "\e[1;32m"
@@ -60,7 +67,8 @@ proc printFailed(output: string, suffix = "") =
 
 task test, "Runs the test suite":
   ## Executes all tests.
-  var files = getFiles()
+  let baseDir = system.getCurrentDir() / "tests"
+  var files = getFiles(baseDir)
 
   if files.len < 1:
     echo &"{colRed}Warning{colReset}: No tests found!"
@@ -73,11 +81,12 @@ task test, "Runs the test suite":
   var numFailed = 0
 
   for file in files:
-    let (_, name, _) = file.path.splitFile()
+    let (_, name, _) = file.splitFile()
     let expectedError = name.startswith("testerror")
 
-    echo &" * {colYellow}{file.path.extractFilename}{colReset}"
-    let ret = gorgeEx &"nim -r -d:release --colors:on {compiler} {file.path}"
+    let relativePath = file.relativeTo(baseDir)
+    echo &" * {colYellow}{relativePath}{colReset}"
+    let ret = gorgeEx &"nim -r -d:release --colors:on {compiler} {file}"
     deleteRunnable(file, mode)
 
     if not expectedError:
@@ -94,7 +103,7 @@ task test, "Runs the test suite":
       else:
         var expectedMessage: string
         var i = 0
-        for line in staticRead(file.path).splitLines():
+        for line in staticRead(file).splitLines():
           if i == 1:
             expectedMessage = line.strip()
           inc i

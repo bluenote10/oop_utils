@@ -1,4 +1,4 @@
-import closure_methods/match_instance
+import oop_utils/match_instance
 
 type
   Base = ref object of RootObj
