@@ -12,7 +12,8 @@ tasks:
   default:
     fileset: default
     commands:
-      #- "nim -r c ./tests/test_basic_2.nim"
+      - "nim -r c ./tests/standard_class/test_basic_1.nim"
+      #- "nim -r c ./tests/test_basic_1.nim"
       #- "nim -r c ./tests/test_inheritance_chain.nim"
       #- "nim -r c ./tests/test_overload.nim"
       #- "nim -r c ./tests/test_empty_ctor.nim"
@@ -22,7 +23,7 @@ tasks:
       #- "nim -r c ./tests/test_generics_1.nim"
       #- "nim -r c ./tests/test_ctor_calls_2.nim"
       #- "nim -r c ./tests/test_ctor_post_init.nim"
-      - "nim -r c ./tests/test_closure_correctness.nim"
+      #- "nim -r c ./tests/test_closure_correctness.nim"
       #- "nim -r c ./tests/test_match_instance.nim"
 
       #- "nim -r js ./benchmarks/basic_dispatch_methods.nim"
