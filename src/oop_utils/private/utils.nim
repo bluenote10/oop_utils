@@ -1,5 +1,6 @@
 import macros
 import options
+import strformat
 
 
 iterator items*[T](o: Option[T]): T =
@@ -13,6 +14,10 @@ proc expectKinds*(n: NimNode, kinds: set[NimNodeKind]) {.compileTime.} =
   ## macros that check the AST that is passed to them.
   if not kinds.contains(n.kind): error("Expected a node of kinds " & $kinds & ", got " & $n.kind, n)
 
+
+proc isIdent*(n: NimNode): bool =
+  n.kind == nnkIdent
+
 proc isIdent*(n: NimNode, s: string): bool =
   n.kind == nnkIdent and n.strVal == s
 
@@ -25,6 +30,15 @@ proc `procBody=`*(n: NimNode, other: NimNode) =
   expectKinds n, {nnkProcDef, nnkMethodDef, nnkLambda}
   expectKinds other, {nnkStmtList, nnkEmpty}
   n[n.len - 1] = other
+
+proc procName*(n: NimNode): string =
+  expectKinds n, {nnkProcDef, nnkMethodDef, nnkLambda}
+  if n[0].isIdent:
+    result = n[0].strVal
+  elif n[0].kind == nnkPostfix and n[0][0].isIdent("*") and n[0][1].isIdent():
+    result = n[0][1].strVal
+  else:
+    error &"Cannot infer proc name from {n.repr}", n
 
 proc genericParams*(n: NimNode): NimNode =
   expectKinds n, {nnkProcDef}

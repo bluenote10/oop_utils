@@ -4,8 +4,10 @@ import options
 import sets
 import strutils
 import sequtils
+import sugar
 
 import private/utils
+import private/common
 
 import oop_utils/match_instance
 export match_instance
@@ -194,7 +196,7 @@ proc parseConstructor(n: NimNode): Constructor =
   else:
     #let name = n[1].strVal
     #Constructor(name: some(name), args: @[])
-    error "not supported", n
+    error "Empty constructors are not yet supported", n
 
 # -----------------------------------------------------------------------------
 # Body parsing
@@ -205,17 +207,15 @@ type
     node: NimNode
 
   Body = ref object
-    ctor: Constructor
+    ctor: Option[Constructor]
     funcs: seq[Func]
 
 proc parseBody(body: NimNode): Body =
   result = Body()
-  var found = false
   for n in body:
     if n.isConstructor():
-      if not found:
-        result.ctor = n.parseConstructor()
-        found = true
+      if result.ctor.isNone:
+        result.ctor = some(n.parseConstructor())
       else:
         error "Class definition must have only one constructor.", n
     elif n.kind == nnkProcDef or n.kind == nnkMethodDef:
@@ -223,22 +223,19 @@ proc parseBody(body: NimNode): Body =
     else:
       error "Disallowed node in class definition:\n" & n.repr, n
 
-  if not found:
-    error "No constructor found."
-
 
 # -----------------------------------------------------------------------------
 # Assembly of output procs
 # -----------------------------------------------------------------------------
 
-proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructor): NimNode =
+proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, fields: seq[Field]): NimNode =
   # create type fields from exported methods
-  let fields =
-    if ctor.fields.len == 0:
+  let fieldsNode =
+    if fields.len == 0:
       newEmptyNode()
     else:
       let reclist = newNimNode(nnkRecList)
-      for field in ctor.fields:
+      for field in fields:
         let fieldName =
           if field.access == Access.Public:
             publicIdent(field.name)
@@ -260,7 +257,7 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, ctor: Construc
         newNimNode(nnkOfInherit).add(
           baseSymbol
         ),
-        fields,
+        fieldsNode,
       )
     )
   )
@@ -397,25 +394,27 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
   # extract blocks and fields
   let body = parseBody(body)
-  let ctor = body.ctor
+  let fields = body.ctor.map(ctor => ctor.fields).get(newSeq[Field]())
 
   #[
+  # TODO: add verification of base call usage
   if not overloadInfo.isFullyOverloaded and not parsedBody.hasBaseCall:
     error &"Class '{classDef.name}' needs to have a base(...) call because it doesn't overload all parent methods.", body
   if parsedBody.hasBaseCall and baseSymbol.strVal == "RootObj":
     error &"Class '{classDef.name}' cannot have base call, because it is a root class.", body
-    ]#
+  ]#
 
-  let typeSection = assembleTypeSection(classDef, baseSymbol, ctor)
-  let patchProc = assemblePatchProc(classDef, baseSymbol, ctor)
-
+  let typeSection = assembleTypeSection(classDef, baseSymbol, fields)
   result.add(typeSection)
-  result.add(patchProc)
+
+  for ctor in body.ctor:
+    let patchProc = assemblePatchProc(classDef, baseSymbol, ctor)
+    result.add(patchProc)
 
   # Add accessor templates
   template accessor(field, fieldType, selfSymbol): untyped {.dirty.} =
     template field*(self: selfSymbol): fieldType = self.field
-  for field in ctor.fields:
+  for field in fields:
     if field.access == Access.Readable:
       result.add(getAst(accessor(
         ident(field.name),
@@ -434,14 +433,18 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
   for f in body.funcs:
     let n = f.node.copyNimTree()
     n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
+    echo n.treeRepr
+    if n.kind == nnkMethodDef and n.procBody.kind == nnkEmpty:
+      n.procBody = generateUnimplementedBody(n.procName)
     result.add(n)
 
   # Generate constructors if not abstract
-  let genericConstructorProc = assembleGenericConstructor(classDef, ctor)
-  result.add(genericConstructorProc)
-  for name in ctor.name:
-    let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor)
-    result.add(namedConstructorProc)
+  for ctor in body.ctor:
+    let genericConstructorProc = assembleGenericConstructor(classDef, ctor)
+    result.add(genericConstructorProc)
+    for name in ctor.name:
+      let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor)
+      result.add(namedConstructorProc)
 
   # Take a copy as a work-around for: https://github.com/nim-lang/Nim/issues/10902
   result = result.copy

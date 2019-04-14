@@ -6,6 +6,7 @@ import strutils
 import sequtils
 
 import private/utils
+import private/common
 
 import oop_utils/match_instance
 export match_instance
@@ -244,10 +245,7 @@ proc parseProcDef(procDef: NimNode): ParsedProc =
 
     # transform 2: inject dummy body for abstracts
     if isAbstract:
-      let errorMsg = &"called abstract method '{name}'"
-      transformedProcDef.body = newStmtList(
-        newCall(ident "doAssert", ident "false", newStrLitNode(errorMsg))
-      )
+      transformedProcDef.body = generateUnimplementedBody(name)
 
     result = ExportedProc(
       name: name,
