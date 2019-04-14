@@ -218,7 +218,7 @@ proc parseBody(body: NimNode): Body =
         result.ctor = some(n.parseConstructor())
       else:
         error "Class definition must have only one constructor.", n
-    elif n.kind == nnkProcDef or n.kind == nnkMethodDef:
+    elif n.kind == nnkProcDef or n.kind == nnkMethodDef or n.kind == nnkTemplateDef:
       result.funcs.add(Func(node: n))
     else:
       error "Disallowed node in class definition:\n" & n.repr, n
@@ -424,16 +424,16 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
   # Add funcs (forward declarations)
   for f in body.funcs:
-    let n = f.node.copyNimTree()
-    n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
-    n.procBody = newEmptyNode()
-    result.add(n)
+    if f.node.kind != nnkTemplateDef: # templates cannot be forward declared
+      let n = f.node.copyNimTree()
+      n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
+      n.procBody = newEmptyNode()
+      result.add(n)
 
   # Add funcs
   for f in body.funcs:
     let n = f.node.copyNimTree()
     n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
-    echo n.treeRepr
     if n.kind == nnkMethodDef and n.procBody.kind == nnkEmpty:
       n.procBody = generateUnimplementedBody(n.procName)
     result.add(n)
