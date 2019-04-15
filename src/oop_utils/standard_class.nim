@@ -407,10 +407,6 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
   let typeSection = assembleTypeSection(classDef, baseSymbol, fields)
   result.add(typeSection)
 
-  for ctor in body.ctor:
-    let patchProc = assemblePatchProc(classDef, baseSymbol, ctor)
-    result.add(patchProc)
-
   # Add accessor templates
   template accessor(field, fieldType, selfSymbol): untyped {.dirty.} =
     template field*(self: selfSymbol): fieldType = self.field
@@ -437,6 +433,11 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
     if n.kind == nnkMethodDef and n.procBody.kind == nnkEmpty:
       n.procBody = generateUnimplementedBody(n.procName)
     result.add(n)
+
+  # Add patch proc
+  for ctor in body.ctor:
+    let patchProc = assemblePatchProc(classDef, baseSymbol, ctor)
+    result.add(patchProc)
 
   # Generate constructors if not abstract
   for ctor in body.ctor:
