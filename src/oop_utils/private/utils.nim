@@ -15,6 +15,24 @@ proc expectKinds*(n: NimNode, kinds: set[NimNodeKind]) {.compileTime.} =
   if not kinds.contains(n.kind): error("Expected a node of kinds " & $kinds & ", got " & $n.kind, n)
 
 
+proc isCall*(n: NimNode): bool =
+  n.kind == nnkCall
+
+proc isCommand*(n: NimNode): bool =
+  n.kind == nnkCommand
+
+proc isStmtList*(n: NimNode): bool =
+  n.kind == nnkStmtList
+
+proc isVariableBinding*(n: NimNode): bool =
+  n.kind in {nnkLetSection, nnkVarSection, nnkConstSection}
+
+proc isAsgn*(n: NimNode): bool =
+  n.kind == nnkAsgn
+
+proc isAccQuoted*(n: NimNode): bool =
+  n.kind == nnkAccQuoted
+
 proc isIdent*(n: NimNode): bool =
   n.kind == nnkIdent
 

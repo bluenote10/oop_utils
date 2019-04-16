@@ -75,9 +75,7 @@ type
   BodyStmt = ref object of RootObj
   BodyStmtNode = ref object of BodyStmt
     node: NimNode
-  BodySelfAsgn = ref object of BodyStmt
-    field: string
-    rhs: NimNode
+  BodySelfBlock = ref object of BodyStmt
   BodyStmtBaseCall = ref object of BodyStmt
     baseCall: ParsedBaseCall
 
@@ -90,6 +88,7 @@ type
     name: string
     access: Access
     typ: NimNode
+    rhs: NimNode
 
   Constructor = ref object
     name: Option[string]
@@ -103,66 +102,26 @@ proc isConstructor(n: NimNode): bool =
   # - ctor proc(...)
   # - ctor(named) proc(...)
   let case1 = n.kind == nnkCommand and (
-    (n[0].kind == nnkIdent and n[0].strVal == "ctor") or
-    (n[0].kind == nnkCall and n[0][0].kind == nnkIdent and n[0][0].strVal == "ctor")
+    (n[0].isIdent("ctor")) or
+    (n[0].kind == nnkCall and n[0][0].isIdent("ctor"))
   )
   # case2 matches ctor without arguments:
   # - ctor(named)
-  let case2 = n.kind == nnkCall and n[0].kind == nnkIdent and n[0].strVal == "ctor"
+  let case2 = n.kind == nnkCall and n[0].isIdent("ctor")
+  # Discussion: Do standard_classes need the empty constructor?
+  # On first glance: If a class has no fields, there is no need to have a
+  # patch functions. But: If there is an inheritance chain of A => B => C
+  # and class A has fields, but class B has no (own) fields, it would still
+  # be necessary for C to call the empty base() on B, which in turn does
+  # the non-empty base(...) call on A.
+  # But still: Is a NAMED constructor isn't required, or can the generic
+  # patch/init functions serve this purpose?
   return case1 or case2
 
 proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
-  #[
-    Asgn
-      Infix
-        Ident "*"
-        DotExpr
-          Ident "self"
-          Ident "x"
-        Prefix
-          Ident "is"
-          Ident "int"
-      Ident "xInit"
-    Asgn
-      Infix
-        Ident "+"
-        DotExpr
-          Ident "self"
-          Ident "y"
-        Prefix
-          Ident "is"
-          Ident "int"
-      Ident "xInit"
-    Asgn
-      Infix
-        Ident "is"
-        DotExpr
-          Ident "self"
-          Ident "p"
-        Ident "string"
-      StrLit "asdf"
-  ]#
   for n in ctorBody:
-    if n.kind == nnkAsgn and n[0].kind == nnkInfix:
-      let infix = n[0]
-      let rhs = n[1]
-      if infix[0].isIdent("*") and infix[1].kind == nnkDotExpr and
-         infix[1][0].isIdent("self") and infix[2].kind == nnkPrefix and infix[2][0].isIdent("is"):
-          let name = infix[1][1].strVal
-          let typ = infix[2][1]
-          ctor.fields.add(Field(name: name, access: Access.Public, typ: typ))
-          ctor.body.add(BodySelfAsgn(field: name, rhs: rhs))
-      elif infix[0].isIdent("+") and infix[1].kind == nnkDotExpr and
-           infix[1][0].isIdent("self") and infix[2].kind == nnkPrefix and infix[2][0].isIdent("is"):
-          let name = infix[1][1].strVal
-          let typ = infix[2][1]
-          ctor.fields.add(Field(name: name, access: Access.Readable, typ: typ))
-          ctor.body.add(BodySelfAsgn(field: name, rhs: rhs))
-      elif infix[0].isIdent("is") and infix[1].kind == nnkDotExpr and infix[1][0].isIdent("self"):
-          let name = infix[1][1].strVal
-          let typ = infix[2]
-          ctor.fields.add(Field(name: name, access: Access.Private, typ: typ))
-          ctor.body.add(BodySelfAsgn(field: name, rhs: rhs))
+    if n.isCall and n[0].isIdent("self") and n[1].isStmtList:
+      ctor.body.add(BodySelfBlock())
     elif n.isBaseCall():
       if not ctor.hasBaseCall:
         ctor.hasBaseCall = true
@@ -228,7 +187,34 @@ proc parseBody(body: NimNode): Body =
 # Assembly of output procs
 # -----------------------------------------------------------------------------
 
+proc extractFields(pseudoCtor: NimNode): seq[Field] =
+  # find self block
+  var selfBlockContent: NimNode
+  for n in pseudoCtor.procBody:
+    if n.kind == nnkBlockStmt and n[0].strVal == "self":
+      selfBlockContent = n[1]
+  if selfBlockContent.isNil:
+    error &"Could not find self block in {pseudoCtor.repr}", pseudoCtor
+
+  # extract fields
+  var fields = newSeq[Field]()
+  for n in selfBlockContent:
+    if n.isVariableBinding:
+      for identDef in n:
+        let field = identDef[0]
+        let texpr = identDef[2]
+        fields.add(Field(
+          name: field.strVal,
+          access: Access.Private,
+          typ: texpr.getType,
+          rhs: texpr,
+        ))
+
+  return fields
+
+
 proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, fields: seq[Field]): NimNode =
+
   # create type fields from exported methods
   let fieldsNode =
     if fields.len == 0:
@@ -264,7 +250,8 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, fields: seq[Fi
   typeSection.add(typeDef)
   return typeSection
 
-proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructor): NimNode =
+
+proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructor, fields: seq[Field]): NimNode =
 
   # main proc def
   let selfIdent = ident "self"
@@ -287,11 +274,15 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
       case bodyStmt:
       of BodyStmtNode:
         result.procBody.add(bodyStmt.node)
-      of BodySelfAsgn:
-        result.procBody.add(newAssignment(
-          newDotExpr(selfIdent, ident(bodyStmt.field)),
-          bodyStmt.rhs,
-        ))
+      of BodySelfBlock:
+        for field in fields:
+          #echo field.rhs.treeRepr
+          #let x = if field.rhs.kind != nnkSym: field.rhs else: ident field.rhs.strVal
+          #echo x.treeRepr
+          result.procBody.add(newAssignment(
+            newDotExpr(selfIdent, ident(field.name)),
+            field.rhs,
+          ))
       of BodyStmtBaseCall:
         let baseCall = bodyStmt.baseCall
         # make base call
@@ -320,6 +311,7 @@ proc assembleConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constru
   )
   patchCall.add(ident "self")
   for arg in ctor.args:
+    echo arg[0].treeRepr
     patchCall.add(arg[0])
   procDef.procBody.add(patchCall)
 
@@ -374,7 +366,7 @@ proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor): NimNode 
 # Main class macro impl
 # -----------------------------------------------------------------------------
 
-macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
+macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyped): untyped =
 
   result = newStmtList()
   echo "-----------------------------------------------------------------------"
@@ -394,7 +386,7 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
   # extract blocks and fields
   let body = parseBody(body)
-  let fields = body.ctor.map(ctor => ctor.fields).get(newSeq[Field]())
+  let fields = extractFields(pseudoCtor)
 
   #[
   # TODO: add verification of base call usage
@@ -436,7 +428,7 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
   # Add patch proc
   for ctor in body.ctor:
-    let patchProc = assemblePatchProc(classDef, baseSymbol, ctor)
+    let patchProc = assemblePatchProc(classDef, baseSymbol, ctor, fields)
     result.add(patchProc)
 
   # Generate constructors if not abstract
@@ -452,6 +444,74 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
   echo result.repr
   # echo result.treeRepr
 
+# -----------------------------------------------------------------------------
+# Extraction of pseudo ctor
+# -----------------------------------------------------------------------------
+
+template markPublic*() {.pragma.}
+
+proc newTypedLetStmt*(name, value: NimNode, pragmas: openarray[NimNode] = []): NimNode {.compiletime.} =
+  result = newNimNode(nnkLetSection).add(
+    newNimNode(nnkIdentDefs).add(
+      newNimNode(nnkPragmaExpr).add(
+        name,
+        newNimNode(nnkPragma).add(
+          pragmas
+        )
+      ),
+      newEmptyNode(),
+      value
+    )
+  )
+
+proc transformSelfBlock(body: NimNode): NimNode =
+  result = newBlockStmt(ident "self", newStmtList())
+  for n in body:
+    echo n.treeRepr
+    if n.isIdent:
+      result[1].add(newTypedLetStmt(n, n))
+    elif n.isCommand and n[0].isIdent and n[1].isAccQuoted:
+      let field = n[0]
+      result[1].add(newTypedLetStmt(field, field, [ident "markPublic"]))
+    elif n.isAsgn:
+      var pragma: seq[NimNode]
+      var field: NimNode
+      if n[0].isIdent:
+        field = n[0]
+        pragma = @[]
+      elif n[0].isCommand and n[0][0].isIdent and n[0][1].isAccQuoted:
+        field = n[0][0]
+        pragma = @[ident "markPublic"]
+      else:
+        error &"Unsupported expression in self block: {n.repr}", n
+      let texpr = n[1]
+      result[1].add(newTypedLetStmt(field, texpr, pragma))
+    else:
+      error &"Unsupported expression in self block: {n.repr}", n
+
+proc transformCtorBody(body: NimNode): NimNode =
+  result = newStmtList()
+  for n in body:
+    if n.isCall and n[0].isIdent("self") and n[1].isStmtList:
+      result.add(transformSelfBlock(n[1]))
+      return
+    else:
+      result.add(n)
+
+proc extractPseudoCtor(body: NimNode): NimNode =
+  echo body.repr
+  result = newProc(ident "dummy")
+  for n in body:
+    if n.isConstructor():
+      let ctorLambda = n[1]
+      expectKind ctorLambda, nnkLambda
+      echo ctorLambda.repr
+      result.formalParams = ctorLambda.formalParams
+      result.procBody = transformCtorBody(ctorLambda.procBody)
+
+  # TODO ensure that pseudo ctor has empty return type in case the
+  # user specified anything by accident...
+  echo result.repr
 
 # -----------------------------------------------------------------------------
 # Public macros
@@ -459,21 +519,21 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
 macro class*(definition: untyped, body: untyped): untyped =
   ## Class definition that derives from RootObj.
-  if definition.kind == nnkInfix and definition[0].strVal == "of":
-    result = newCall(
-      bindSym "classImpl",
-      definition[1],
-      definition[2],
-      body,
-    )
-  else:
-    let base = getType(typedesc[RootObj])
-    result = newCall(
-      bindSym "classImpl",
-      definition,
-      base,
-      body,
-    )
+  let pseudoCtor = extractPseudoCtor(body.copyNimTree()) # without copying there is an "environment misses" error...
+
+  let (identDef, identBase) =
+    if definition.kind == nnkInfix and definition[0].strVal == "of":
+      (definition[1], definition[2])
+    else:
+      (definition, getType(typedesc[RootObj]))
+
+  result = newCall(
+    bindSym "classImpl",
+    identDef,
+    identBase,
+    pseudoCtor,
+    body,
+  )
 
 # -----------------------------------------------------------------------------
 # Dev sandbox
