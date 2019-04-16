@@ -13,9 +13,9 @@ tasks:
     fileset: default
     commands:
       #- "nim -r c ./dev/experiment_1.nim"
-      - "nim -r c ./dev/debug_1.nim"
+      #- "nim -r c ./dev/debug_1.nim"
 
-      #- "nim -r c ./tests/standard_class/test_basic_0.nim"
+      - "nim -r c ./tests/standard_class/test_basic_0.nim"
       #- "nim -r c ./tests/standard_class/test_abstract_1.nim"
       #- "nim -r c ./tests/standard_class/test_template_accessors.nim"
 

@@ -187,8 +187,14 @@ proc parseBody(body: NimNode): Body =
 # Assembly of output procs
 # -----------------------------------------------------------------------------
 
-proc extractFields(pseudoCtor: NimNode): seq[Field] =
-  # find self block
+proc extractFields(pseudoCtorBlock: NimNode): seq[Field] =
+
+  # get procdef
+  expectKind pseudoCtorBlock, nnkBlockStmt
+  let pseudoCtor = pseudoCtorBlock[1]
+  expectKind pseudoCtor, nnkProcDef
+
+  # get self block
   var selfBlockContent: NimNode
   for n in pseudoCtor.procBody:
     if n.kind == nnkBlockStmt and n[0].strVal == "self":
@@ -207,7 +213,7 @@ proc extractFields(pseudoCtor: NimNode): seq[Field] =
           name: field.strVal,
           access: Access.Private,
           typ: texpr.getType,
-          rhs: texpr,
+          rhs: toUntyped(texpr), # needed to get rid of already bound symbols
         ))
 
   return fields
@@ -276,9 +282,6 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
         result.procBody.add(bodyStmt.node)
       of BodySelfBlock:
         for field in fields:
-          #echo field.rhs.treeRepr
-          #let x = if field.rhs.kind != nnkSym: field.rhs else: ident field.rhs.strVal
-          #echo x.treeRepr
           result.procBody.add(newAssignment(
             newDotExpr(selfIdent, ident(field.name)),
             field.rhs,
@@ -311,7 +314,6 @@ proc assembleConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constru
   )
   patchCall.add(ident "self")
   for arg in ctor.args:
-    echo arg[0].treeRepr
     patchCall.add(arg[0])
   procDef.procBody.add(patchCall)
 
@@ -450,14 +452,12 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
 
 template markPublic*() {.pragma.}
 
-proc newTypedLetStmt*(name, value: NimNode, pragmas: openarray[NimNode] = []): NimNode {.compiletime.} =
+proc newLetStmtWithPragma*(name, value: NimNode, pragmas: openarray[NimNode] = []): NimNode {.compiletime.} =
   result = newNimNode(nnkLetSection).add(
     newNimNode(nnkIdentDefs).add(
       newNimNode(nnkPragmaExpr).add(
         name,
-        newNimNode(nnkPragma).add(
-          pragmas
-        )
+        newNimNode(nnkPragma).add(pragmas).add(ident "used")
       ),
       newEmptyNode(),
       value
@@ -467,12 +467,12 @@ proc newTypedLetStmt*(name, value: NimNode, pragmas: openarray[NimNode] = []): N
 proc transformSelfBlock(body: NimNode): NimNode =
   result = newBlockStmt(ident "self", newStmtList())
   for n in body:
-    echo n.treeRepr
+    # echo n.treeRepr
     if n.isIdent:
-      result[1].add(newTypedLetStmt(n, n))
+      result[1].add(newLetStmtWithPragma(n, n))
     elif n.isCommand and n[0].isIdent and n[1].isAccQuoted:
       let field = n[0]
-      result[1].add(newTypedLetStmt(field, field, [ident "markPublic"]))
+      result[1].add(newLetStmtWithPragma(field, field, [ident "markPublic"]))
     elif n.isAsgn:
       var pragma: seq[NimNode]
       var field: NimNode
@@ -485,7 +485,7 @@ proc transformSelfBlock(body: NimNode): NimNode =
       else:
         error &"Unsupported expression in self block: {n.repr}", n
       let texpr = n[1]
-      result[1].add(newTypedLetStmt(field, texpr, pragma))
+      result[1].add(newLetStmtWithPragma(field, texpr, pragma))
     else:
       error &"Unsupported expression in self block: {n.repr}", n
 
@@ -499,18 +499,20 @@ proc transformCtorBody(body: NimNode): NimNode =
       result.add(n)
 
 proc extractPseudoCtor(body: NimNode): NimNode =
-  echo body.repr
-  result = newProc(ident "dummy")
+  let ctor = newProc(ident "dummy")
   for n in body:
     if n.isConstructor():
       let ctorLambda = n[1]
       expectKind ctorLambda, nnkLambda
-      echo ctorLambda.repr
-      result.formalParams = ctorLambda.formalParams
-      result.procBody = transformCtorBody(ctorLambda.procBody)
+      ctor.formalParams = ctorLambda.formalParams
+      ctor.procBody = transformCtorBody(ctorLambda.procBody)
 
-  # TODO ensure that pseudo ctor has empty return type in case the
-  # user specified anything by accident...
+      # Validate that the ctor doesn't have a return type. Otherwise
+      # the return type of the pseudo ctor could be wrong.
+      if ctor.formalParams[0].kind != nnkEmpty:
+        error "Constructor must not have a return type.", n
+
+  result = newBlockStmt(ctor)
   echo result.repr
 
 # -----------------------------------------------------------------------------

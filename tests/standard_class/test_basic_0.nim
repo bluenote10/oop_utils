@@ -9,13 +9,15 @@ class(Person):
     echo "pre-construction"
     let fullName = prename & " " & surname
     self:
-      x = 1
       id = generateId()
       prename
       surname`*`
       fullname`*`
+    echo self[]
     echo "post-construction"
 
+
+doAssert(not(compiles(dummy("asdf", "asdf"))))
 
 block:
   let p = Person.init("John", "Doe")

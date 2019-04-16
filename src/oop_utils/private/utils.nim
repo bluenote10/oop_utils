@@ -107,3 +107,20 @@ proc convertProcDefIntoLambda*(n: NimNode): NimNode =
   result.formalParams = n.formalParams
   result.procBody = n.procBody
 
+
+proc toUntyped*(ast: NimNode): NimNode =
+  # Replace NimIdent and NimSym by a fresh ident node
+  proc inspect(node: NimNode): NimNode =
+    case node.kind:
+    of {nnkIdent, nnkSym}:
+      return ident($node)
+    of nnkEmpty:
+      return node
+    of nnkLiterals:
+      return node
+    else:
+      var rTree = node.kind.newTree()
+      for child in node:
+        rTree.add inspect(child)
+      return rTree
+  result = inspect(ast)
