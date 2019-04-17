@@ -76,8 +76,7 @@ type
   BodyStmtNode = ref object of BodyStmt
     node: NimNode
   BodySelfBlock = ref object of BodyStmt
-  BodyStmtBaseCall = ref object of BodyStmt
-    baseCall: ParsedBaseCall
+    baseCall: Option[ParsedBaseCall]
 
 
 type
@@ -120,16 +119,15 @@ proc isConstructor(n: NimNode): bool =
 
 proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
   for n in ctorBody:
-    if n.isCall and n[0].isIdent("self") and n[1].isStmtList:
-      ctor.body.add(BodySelfBlock())
-    elif n.isBaseCall():
-      if not ctor.hasBaseCall:
-        ctor.hasBaseCall = true
-        ctor.body.add(
-          BodyStmtBaseCall(baseCall: n.parseBaseCall())
-        )
-      else:
-        error "Class definition must have only one base call.", n
+    if n.isCall and n[0].isIdent("self") and n[1].isStmtList: # TODO: check if isStmtList is actually correct
+      var baseCall = none(ParsedBaseCall)
+      for sub in n[1]:
+        if sub.isBasecall():
+          if baseCall.isNone:
+            baseCall = some(sub.parseBaseCall)
+          else:
+            error "Class definition must have only one base call.", sub
+      ctor.body.add(BodySelfBlock(baseCall: baseCall))
     else:
       ctor.body.add(BodyStmtNode(node: n))
   # echo ctor.repr
@@ -283,21 +281,20 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
       of BodyStmtNode:
         result.procBody.add(bodyStmt.node)
       of BodySelfBlock:
+        # base call
+        for baseCall in bodyStmt.baseCall:
+          let patchCallBase = newCall(ident "patch")
+          patchCallBase.copyLineInfo(baseCall.origNode)
+          patchCallBase.add(newCall(baseSymbol, selfIdent))
+          for arg in baseCall.args:
+            patchCallBase.add(arg)
+          result.procBody.add(patchCallBase)
+        # inits fields
         for field in fields:
           result.procBody.add(newAssignment(
             newDotExpr(selfIdent, ident(field.name)),
             field.rhs,
           ))
-      of BodyStmtBaseCall:
-        let baseCall = bodyStmt.baseCall
-        # make base call
-        let patchCallBase = newCall(ident "patch")
-        patchCallBase.copyLineInfo(baseCall.origNode)
-        patchCallBase.add(newCall(baseSymbol, selfIdent))
-        for arg in baseCall.args:
-          patchCallBase.add(arg)
-        result.procBody.add(patchCallBase)
-
   # echo "patchProc:\n", result.treeRepr
 
 
@@ -488,6 +485,8 @@ proc transformSelfBlock(body: NimNode): NimNode =
         error &"Unsupported expression in self block: {n.repr}", n
       let texpr = n[1]
       result[1].add(newLetStmtWithPragma(field, texpr, pragma))
+    elif n.isBaseCall:
+      discard
     else:
       error &"Unsupported expression in self block: {n.repr}", n
 
