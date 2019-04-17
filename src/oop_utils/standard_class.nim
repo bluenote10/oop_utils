@@ -119,9 +119,9 @@ proc isConstructor(n: NimNode): bool =
 
 proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
   for n in ctorBody:
-    if n.isCall and n[0].isIdent("self") and n[1].isStmtList: # TODO: check if isStmtList is actually correct
+    if n.isCall and n[0].isIdent("self"):
       var baseCall = none(ParsedBaseCall)
-      for sub in n[1]:
+      for sub in n[1].assumeStmtList:
         if sub.isBasecall():
           if baseCall.isNone:
             baseCall = some(sub.parseBaseCall)

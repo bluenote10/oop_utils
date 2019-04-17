@@ -3,7 +3,8 @@ import strformat
 
 class(Test):
   ctor proc() =
-    self.a is int = 0
+    self:
+      a = 0
 
   template getA*(): int =
     self.a
