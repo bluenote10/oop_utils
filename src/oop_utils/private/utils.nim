@@ -85,6 +85,10 @@ proc `pragmas=`*(n: NimNode, other: NimNode) =
   expectKind other, nnkPragma
   n[4] = other
 
+# -----------------------------------------------------------------------------
+# Factories
+# -----------------------------------------------------------------------------
+
 proc publicIdent*(s: string): NimNode =
   newNimNode(nnkPostfix).add(
     ident "*",
@@ -101,6 +105,16 @@ proc newLambda*(): NimNode =
     newEmptyNode(),
     newStmtList(),
   )
+
+# -----------------------------------------------------------------------------
+# Conversion
+# -----------------------------------------------------------------------------
+
+proc assumeStmtList*(n: NimNode): NimNode =
+  if n.kind == nnkStmtList:
+    n
+  else:
+    newStmtList(n)
 
 proc convertProcDefIntoLambda*(n: NimNode): NimNode =
   result = newLambda()

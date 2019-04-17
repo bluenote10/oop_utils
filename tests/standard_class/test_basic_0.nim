@@ -7,12 +7,11 @@ proc generateId(): int =
 class(Person):
   ctor proc(prename: string, surname: string) =
     echo "pre-construction"
-    let fullName = prename & " " & surname
     self:
       id = generateId()
       prename
       surname`*`
-      fullname`*`
+      fullname`*` = prename & " " & surname
     echo self[]
     echo "post-construction"
 

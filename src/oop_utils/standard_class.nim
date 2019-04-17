@@ -196,15 +196,17 @@ proc extractFields(pseudoCtorBlock: NimNode): seq[Field] =
 
   # get self block
   var selfBlockContent: NimNode
-  for n in pseudoCtor.procBody:
-    if n.kind == nnkBlockStmt and n[0].strVal == "self":
+  proc isSelfBlock(n: NimNode): bool =
+    n.kind == nnkBlockStmt and n[0].strVal == "self"
+  for n in pseudoCtor.procBody.assumeStmtList:
+    if n.isSelfBlock:
       selfBlockContent = n[1]
   if selfBlockContent.isNil:
     error &"Could not find self block in {pseudoCtor.repr}", pseudoCtor
 
   # extract fields
   var fields = newSeq[Field]()
-  for n in selfBlockContent:
+  for n in selfBlockContent.assumeStmtList:
     if n.isVariableBinding:
       for identDef in n:
         let field = identDef[0]
