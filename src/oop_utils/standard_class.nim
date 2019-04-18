@@ -200,7 +200,10 @@ proc extractFields(pseudoCtorBlock: NimNode): seq[Field] =
     if n.isSelfBlock:
       selfBlockContent = n[1]
   if selfBlockContent.isNil:
-    error &"Could not find self block in {pseudoCtor.repr}", pseudoCtor
+    # error &"Could not find self block in {pseudoCtor.repr}", pseudoCtor
+    # For pure abstract classes we need to allow ctors without a self
+    # block. Can this lead to issues?
+    return @[]
 
   # extract fields
   var fields = newSeq[Field]()

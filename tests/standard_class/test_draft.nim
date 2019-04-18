@@ -1,35 +1,15 @@
 import oop_utils/standard_class
 
-{.push warning[Spacing]: off.}
-
-when false:
-  class(Base):
-    ctor(newBase) proc(xInit: int = 10) =
-      #self.x+: int = xInit
-      self.x* is int = xInit
-      x is int = xInit
-      #self.x+ ~> int = xInit
-      Base of Other:
-        x: int = 2  # no * possible
-      #var x*: int = xInit
-      self.init()
-
-      type
-        self = object
-          x {.private.} : int = xInit
-
-
 
 class(Base):
   ctor(newBase) proc(a = 10, b = 20) =
-    self.x* is int = a + 1
-    self.y+ is int = b + 2
-    self.p is string = "asdf"
+    self:
+      x`*` = a + 1
+      y`+` = b + 2
+      p = "asdf"
 
   method baseMethod(z: int): int {.base.} =
     self.x + self.y + z
-
-{.pop.}
 
 block:
   let base = newBase(20)
@@ -40,8 +20,9 @@ block:
 
 class(Sub of Base):
   ctor proc() =
-    base(b = 200, a = 100)
-    self.sub is string = "sub"
+    self:
+      base(b = 200, a = 100)
+      sub = "sub"
 
 block:
   let base = Sub.init()
@@ -53,8 +34,13 @@ block:
 
 class(MyType):
   ctor proc() =
-    self.someField is int = 0
-    self.otherField is string = ""
+    self:
+      someField = 0
+      otherField = ""
+
+  # Syntactically most concise, but no autocompletion here...
+  proc inc() =
+    self.otherField = "asdf"
 
 block:
   # Would enable autocompletion for fields, but autocompletion for methods/procs still fails
@@ -81,9 +67,3 @@ block:
     self.inc()
     self.someField = 1
 
-#[
-block:
-  let b = newBase()
-  doAssert b.getState() == 11
-  doAssert b.getState() == 12
-]#
