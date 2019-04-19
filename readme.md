@@ -16,7 +16,8 @@ import oop_utils/standard_class
 # - Initialization + field definitions go into the ctor proc.
 class(Counter):
   ctor(newCounter) proc(init: int) =
-    self.counter is int = init
+    self:
+      counter = init
 
   method inc*() {.base.} = self.counter.inc
   method dec*() {.base.} = self.counter.dec
