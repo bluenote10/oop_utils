@@ -565,17 +565,15 @@ proc transformCtorBody(body: NimNode): NimNode =
 
 proc extractPseudoCtor(body: NimNode): NimNode =
   let ctor = newProc(ident "dummy")
+  ctor.pragmas = newNimNode(nnkPragma).add(ident "used")
   for n in body:
     unwrap(n):
       ctorParsed @ Constructor:
-        # echo n.treeRepr
-        #let ctorLambda = n[1]
-        #expectKind ctorLambda, nnkLambda
-        #ctor.formalParams = ctorLambda.formalParams
-        #ctor.procBody = transformCtorBody(ctorLambda.procBody)
+        # copy args
         ctor.formalParams = newNimNode(nnkFormalParams).add(newEmptyNode())
         for arg in ctorParsed.args:
           ctor.formalParams.add(arg)
+        # transform body
         ctor.procBody = transformCtorBody(ctorParsed.rawBody)
 
   result = newBlockStmt(ctor)
