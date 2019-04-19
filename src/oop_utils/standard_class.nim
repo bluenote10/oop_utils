@@ -118,8 +118,11 @@ proc isConstructor(n: NimNode): bool =
   return case1 or case2
 
 proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
+  var foundSelfBlock = false
+
   for n in ctorBody:
     if n.isCall and n[0].isIdent("self"):
+      foundSelfBlock = true
       var baseCall = none(ParsedBaseCall)
       for sub in n[1].assumeStmtList:
         if sub.isBasecall():
@@ -130,6 +133,13 @@ proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
       ctor.body.add(BodySelfBlock(baseCall: baseCall))
     else:
       ctor.body.add(BodyStmtNode(node: n))
+
+  # Reached the end of the ctor body without having found a self block?
+  # => return a dummy self block so that automatic generation of base
+  #    calls works.
+  if not foundSelfBlock:
+    ctor.body.add(BodySelfBlock(baseCall: none(ParsedBaseCall)))
+
   # echo ctor.repr
 
 
@@ -260,6 +270,13 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, fields: seq[Fi
   return typeSection
 
 
+template fallbackBaseCall(selfIdent: untyped, baseSymbol: untyped, baseName: string) =
+  when compiles(patch(baseSymbol(selfIdent))):
+    patch(baseSymbol(selfIdent))
+  else:
+    {.error: "Class needs to have an explicit base call, " &
+             "because the constructor of '" & baseName & "' requires parameters.".}
+
 proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructor, fields: seq[Field]): NimNode =
 
   # main proc def
@@ -292,6 +309,12 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
           for arg in baseCall.args:
             patchCallBase.add(arg)
           result.procBody.add(patchCallBase)
+        if bodyStmt.baseCall.isNone:
+          if baseSymbol.strVal != "RootObj":
+            #result.procBody.add(getAst(fallbackBaseCall(selfIdent, baseSymbol, baseSymbol.strVal)))
+            result.procBody.add(newCall(bindsym "fallbackBaseCall",
+              [selfIdent, baseSymbol, newStrLitNode(baseSymbol.strVal)]
+            ))
         # inits fields
         for field in fields:
           result.procBody.add(newAssignment(
