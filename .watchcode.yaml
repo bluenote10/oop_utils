@@ -17,8 +17,8 @@ tasks:
 
       #- "nim -r c ./tests/standard_class/test_draft.nim"
       #- "nim -r c ./tests/standard_class/test_basic_3.nim"
-      - "nim -r c ./tests/standard_class/testerror_base_calls_1.nim"
-      #- "nim -r c ./tests/standard_class/test_abstract_1.nim"
+      #- "nim -r c ./tests/standard_class/testerror_base_calls_1.nim"
+      - "nim -r c ./tests/standard_class/test_abstract_1.nim"
       #- "nim -r c ./tests/standard_class/test_template_accessors.nim"
 
       #- "nim -r c ./tests/test_basic_1.nim"

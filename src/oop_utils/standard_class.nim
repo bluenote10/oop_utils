@@ -94,7 +94,6 @@ type
     args: seq[NimNode]
     fields: seq[Field]
     body: seq[BodyStmt]
-    hasBaseCall: bool
 
 proc isConstructor(n: NimNode): bool =
   # case1 matches:
@@ -426,7 +425,7 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
   let typeSection = assembleTypeSection(classDef, baseSymbol, fields)
   result.add(typeSection)
 
-  # Add accessor templates
+  # Generate accessor templates
   template accessor(field, fieldType, selfSymbol): untyped {.dirty.} =
     template field*(self: selfSymbol): fieldType = self.field
   for field in fields:
@@ -437,7 +436,7 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
         classDef.identClass),
       ))
 
-  # Add funcs (forward declarations)
+  # Generate funcs forward declarations
   for f in body.funcs:
     if f.node.kind != nnkTemplateDef: # templates cannot be forward declared
       let n = f.node.copyNimTree()
@@ -445,7 +444,7 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
       n.procBody = newEmptyNode()
       result.add(n)
 
-  # Add funcs
+  # Generate funcs
   for f in body.funcs:
     let n = f.node.copyNimTree()
     n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
@@ -453,18 +452,28 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
       n.procBody = generateUnimplementedBody(n.procName)
     result.add(n)
 
-  # Add patch proc
-  for ctor in body.ctor:
-    let patchProc = assemblePatchProc(classDef, baseSymbol, ctor, fields)
-    result.add(patchProc)
+  # Generate patch proc
+  let defaultConstructor = Constructor(
+    name: none(string),
+    args: @[],
+    fields: @[],
+    body: @[],
+  )
+  let ctor = body.ctor.get(defaultConstructor)
+  let patchProc = assemblePatchProc(classDef, baseSymbol, ctor, fields)
+  result.add(patchProc)
 
-  # Generate constructors if not abstract
-  for ctor in body.ctor:
-    let genericConstructorProc = assembleGenericConstructor(classDef, ctor)
-    result.add(genericConstructorProc)
-    for name in ctor.name:
-      let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor)
-      result.add(namedConstructorProc)
+  # Generate constructors
+  # TODO: Because of the fallback logic to the default constructor, we currently
+  # generate an init proc also for pure abstract classes. The alternative would
+  # be to generate ctors only if body.ctor is defined, but than we wouldn't be
+  # able to construct non-abstract classes that legitimately omit the ctor proc.
+  # A nice addition would be to add check for pure abstract classes.
+  let genericConstructorProc = assembleGenericConstructor(classDef, ctor)
+  result.add(genericConstructorProc)
+  for name in ctor.name:
+    let namedConstructorProc = assembleNamedConstructor(name, classDef, ctor)
+    result.add(namedConstructorProc)
 
   # Take a copy as a work-around for: https://github.com/nim-lang/Nim/issues/10902
   result = result.copy
@@ -529,6 +538,7 @@ proc extractPseudoCtor(body: NimNode): NimNode =
   let ctor = newProc(ident "dummy")
   for n in body:
     if n.isConstructor():
+      # echo n.treeRepr
       let ctorLambda = n[1]
       expectKind ctorLambda, nnkLambda
       ctor.formalParams = ctorLambda.formalParams
@@ -563,47 +573,3 @@ macro class*(definition: untyped, body: untyped): untyped =
     pseudoCtor,
     body,
   )
-
-# -----------------------------------------------------------------------------
-# Dev sandbox
-# -----------------------------------------------------------------------------
-
-when false:
-  # for quick tree dumps
-
-  macro test1(n: untyped): untyped =
-    echo n.treeRepr
-
-  macro test0(n: untyped): untyped =
-    discard
-
-  static:
-    test0:
-      constructor(named) = proc (x: T = 10)
-      constructor = proc(x: T = 10)
-
-      # ctor[T](x: T = 10)  # default args not allowed, so we need a ProcTy
-      @ctor proc(x: T = 10)
-      @ctor(named) proc(x: T = 10)
-
-      ctor proc(x: T = 10)
-      ctor(named) proc(x: T = 10)
-
-      base(x, y)
-
-      proc t[T](x: T = 10)
-
-    test0:
-      proc patch[T](x: T) =
-        discard
-
-    test0:
-      proc init(T: typedesc[Foo])
-
-    test1:
-      type
-        Abstract* = ref object of RootObj
-          #id*: proc (): string
-          id* {.abstractMethod.}: proc (): string
-
-    error("Tree dumped")
