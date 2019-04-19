@@ -8,8 +8,7 @@ class(ImplA of Abstract):
   method id*(): string = "implA"
 
 class(ImplB of Abstract):
-  ctor(newImplB) proc() =
-    discard
+  ctor(newImplB)
   method id*(): string = "implB"
 
 class(ImplC of Abstract):

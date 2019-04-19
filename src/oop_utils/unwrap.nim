@@ -3,7 +3,7 @@ import macros
 import private/utils
 
 macro unwrap*(matchExpr: typed, body: untyped): untyped =
-  echo body.treeRepr
+  #echo body.treeRepr
   result = newStmtList()
 
   var ifBranches = newSeq[tuple[cond, body: NimNode]]()
@@ -35,4 +35,4 @@ macro unwrap*(matchExpr: typed, body: untyped): untyped =
     ifStmt.add(newNimNode(nnkElse).add(elseBranch))
   result.add(ifStmt)
 
-  echo result.repr
+  #echo result.repr

@@ -8,6 +8,7 @@ import sugar
 
 import private/utils
 import private/common
+import unwrap
 
 import oop_utils/match_instance
 export match_instance
@@ -94,27 +95,18 @@ type
     args: seq[NimNode]
     fields: seq[Field]
     body: seq[BodyStmt]
+    rawBody: NimNode
 
-proc isConstructor(n: NimNode): bool =
-  # case1 matches:
-  # - ctor proc(...)
-  # - ctor(named) proc(...)
-  let case1 = n.kind == nnkCommand and (
-    (n[0].isIdent("ctor")) or
-    (n[0].kind == nnkCall and n[0][0].isIdent("ctor"))
+
+proc defaultConstructor(name = none(string)): Constructor =
+  Constructor(
+    name: name,
+    args: @[],
+    fields: @[],
+    body: @[],
+    rawBody: newStmtList(),
   )
-  # case2 matches ctor without arguments:
-  # - ctor(named)
-  let case2 = n.kind == nnkCall and n[0].isIdent("ctor")
-  # Discussion: Do standard_classes need the empty constructor?
-  # On first glance: If a class has no fields, there is no need to have a
-  # patch functions. But: If there is an inheritance chain of A => B => C
-  # and class A has fields, but class B has no (own) fields, it would still
-  # be necessary for C to call the empty base() on B, which in turn does
-  # the non-empty base(...) call on A.
-  # But still: Is a NAMED constructor isn't required, or can the generic
-  # patch/init functions serve this purpose?
-  return case1 or case2
+
 
 proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
   var foundSelfBlock = false
@@ -142,27 +134,69 @@ proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
   # echo ctor.repr
 
 
-proc parseConstructor(n: NimNode): Constructor =
-  expectKinds n, {nnkCommand, nnkCall}
-  if n.kind == nnkCommand:
+proc parseConstructor(n: NimNode): Option[Constructor] =
+  # case1 matches:
+  # - ctor proc(...)
+  # - ctor(named) proc(...)
+  let case1 = n.kind == nnkCommand and (
+    (n[0].isIdent("ctor")) or
+    (n[0].kind == nnkCall and n[0][0].isIdent("ctor"))
+  )
+  # case2 matches ctor without arguments:
+  # - ctor(named)
+  let case2 = n.kind == nnkCall and n[0].isIdent("ctor")
+
+  if case1:
     let name =
       if n[0].kind == nnkCall:
         some(n[0][1].strVal)
       else:
         none(string)
+
+    # Validate that the ctor has a body. Without a body the AST element
+    # becomes nnkProcTy instead of an nnkLambda.
+    if n[1].kind == nnkProcTy:
+      error "Constructor needs body needs an implementation (or omit the proc() expression entirely).", n
+
     expectKind n[1], nnkLambda
     let ctorLambda = n[1]
+
+    # Validate that the ctor doesn't have a return type. Otherwise
+    # the return type of the pseudo ctor could be wrong.
+    if ctorLambda.formalParams[0].kind != nnkEmpty:
+      error "Constructor must not have a return type.", n
+
     # Copy children 1..n of ProcTy's FormalParams
     var args = newSeq[NimNode]()
     let formalParams = ctorLambda.formalParams
     for i in 1 ..< formalParams.len:
       args.add(formalParams[i])
-    result = Constructor(name: name, args: args) #, fields: parseConstructorBody(ctorLambda.procBody))
-    parseConstructorBody(ctorLambda.procBody, result)
+
+    let ctor = Constructor(name: name, args: args, rawBody: ctorLambda.procBody) #, fields: parseConstructorBody(ctorLambda.procBody))
+    parseConstructorBody(ctorLambda.procBody, ctor)
+    return some(ctor)
+
+  elif case2:
+    expectKind n[1], nnkIdent
+    let name = n[1].strVal
+    return some(defaultConstructor(some(name)))
+
   else:
-    #let name = n[1].strVal
-    #Constructor(name: some(name), args: @[])
-    error "Empty constructors are not yet supported", n
+    #error "Invalid constructor syntax", n
+    return none(Constructor)
+
+
+type
+  AnyProcDef = object
+
+proc unwrapImpl(T: typedesc[Constructor], n: NimNode): Option[Constructor] =
+  parseConstructor(n)
+
+proc unwrapImpl(T: typedesc[AnyProcDef], n: NimNode): Option[NimNode] =
+  if n.kind == nnkProcDef or n.kind == nnkMethodDef or n.kind == nnkTemplateDef:
+    some(n)
+  else:
+    none(NimNode)
 
 # -----------------------------------------------------------------------------
 # Body parsing
@@ -179,15 +213,16 @@ type
 proc parseBody(body: NimNode): Body =
   result = Body()
   for n in body:
-    if n.isConstructor():
-      if result.ctor.isNone:
-        result.ctor = some(n.parseConstructor())
-      else:
-        error "Class definition must have only one constructor.", n
-    elif n.kind == nnkProcDef or n.kind == nnkMethodDef or n.kind == nnkTemplateDef:
-      result.funcs.add(Func(node: n))
-    else:
-      error "Disallowed node in class definition:\n" & n.repr, n
+    unwrap(n):
+      ctor @ Constructor:
+        if result.ctor.isNone:
+          result.ctor = some(ctor)
+        else:
+          error "Class definition must have only one constructor.", n
+      n @ AnyProcDef:
+        result.funcs.add(Func(node: n))
+      _:
+        error "Disallowed node in class definition:\n" & n.repr, n
 
 
 # -----------------------------------------------------------------------------
@@ -453,13 +488,7 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
     result.add(n)
 
   # Generate patch proc
-  let defaultConstructor = Constructor(
-    name: none(string),
-    args: @[],
-    fields: @[],
-    body: @[],
-  )
-  let ctor = body.ctor.get(defaultConstructor)
+  let ctor = body.ctor.get(defaultConstructor())
   let patchProc = assemblePatchProc(classDef, baseSymbol, ctor, fields)
   result.add(patchProc)
 
@@ -537,17 +566,17 @@ proc transformCtorBody(body: NimNode): NimNode =
 proc extractPseudoCtor(body: NimNode): NimNode =
   let ctor = newProc(ident "dummy")
   for n in body:
-    if n.isConstructor():
-      # echo n.treeRepr
-      let ctorLambda = n[1]
-      expectKind ctorLambda, nnkLambda
-      ctor.formalParams = ctorLambda.formalParams
-      ctor.procBody = transformCtorBody(ctorLambda.procBody)
-
-      # Validate that the ctor doesn't have a return type. Otherwise
-      # the return type of the pseudo ctor could be wrong.
-      if ctor.formalParams[0].kind != nnkEmpty:
-        error "Constructor must not have a return type.", n
+    unwrap(n):
+      ctorParsed @ Constructor:
+        # echo n.treeRepr
+        #let ctorLambda = n[1]
+        #expectKind ctorLambda, nnkLambda
+        #ctor.formalParams = ctorLambda.formalParams
+        #ctor.procBody = transformCtorBody(ctorLambda.procBody)
+        ctor.formalParams = newNimNode(nnkFormalParams).add(newEmptyNode())
+        for arg in ctorParsed.args:
+          ctor.formalParams.add(arg)
+        ctor.procBody = transformCtorBody(ctorParsed.rawBody)
 
   result = newBlockStmt(ctor)
   echo result.repr
