@@ -27,7 +27,7 @@ proc getFiles(baseDir: File): seq[File] =
   result = newSeq[File]()
   for file in oswalkdir.walkDirRec(baseDir):
     let (_, name, ext) = file.splitFile()
-    if ext == ".nim" and name.startswith("test"):
+    if ext == ".nim" and (name.contains("test") or name.contains("error")):
       result.add(file)
   result.sort((a, b) => cmp(a, b))
 
@@ -82,7 +82,7 @@ task test, "Runs the test suite":
 
   for file in files:
     let (_, name, _) = file.splitFile()
-    let expectedError = name.startswith("testerror")
+    let expectedError = name.contains("error")
 
     let relativePath = file.relativeTo(baseDir)
     echo &" * {colYellow}{relativePath}{colReset}"
