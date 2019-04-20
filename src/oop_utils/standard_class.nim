@@ -140,7 +140,7 @@ proc parseSelfBlock(body: NimNode, ctor: Constructor) =
       else:
         error &"Unsupported expression in self block: {n.repr}", n
       let texpr = n[1]
-      ctor.fields.add(field(field.strVal, Access.Private, texpr))
+      ctor.fields.add(field(field.strVal, access, texpr))
     elif n.isBaseCall:
       if baseCall.isNone:
         baseCall = some(n.parseBaseCall)
@@ -216,7 +216,16 @@ proc parseConstructor(n: NimNode): Option[Constructor] =
   elif case2:
     expectKind n[1], nnkIdent
     let name = n[1].strVal
-    return some(defaultConstructor(some(name)))
+    # The len determines whether the ctor call has a body or not.
+    if n.len == 2:
+      let ctor = defaultConstructor(some(name))
+      return some(ctor)
+    elif n.len == 3:
+      let ctor = defaultConstructor(some(name))
+      parseConstructorBody(n[2].assumeStmtList, ctor)
+      return some(ctor)
+    else:
+      error &"Constructor call has unexpected len: {n.repr}"
 
   else:
     #error "Invalid constructor syntax", n
