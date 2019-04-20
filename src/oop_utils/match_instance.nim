@@ -2,6 +2,7 @@ import macros
 import strformat
 
 proc makeTemplate(ident: string, typeName: string): NimNode =
+  # TODO: add `used` pragma to avoid warnings if the ident is not used by client.
   result = newNimNode(nnkTemplateDef).add(
     ident(ident),
     newEmptyNode(),

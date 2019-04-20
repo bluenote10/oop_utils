@@ -2,6 +2,7 @@ import macros
 import strformat
 import options
 import sets
+import tables
 import strutils
 import sequtils
 import sugar
@@ -97,6 +98,13 @@ type
     body: seq[BodyStmt]
     rawBody: NimNode
 
+proc field(name: string, access: Access, rhs: NimNode, typ: NimNode = nil): Field =
+  Field(
+    name: name,
+    access: access,
+    typ: typ,
+    rhs: rhs,
+  )
 
 proc defaultConstructor(name = none(string)): Constructor =
   Constructor(
@@ -108,20 +116,49 @@ proc defaultConstructor(name = none(string)): Constructor =
   )
 
 
+proc parseSelfBlock(body: NimNode, ctor: Constructor) =
+  var baseCall = none(ParsedBaseCall)
+
+  for n in body:
+    if n.isIdent:
+      ctor.fields.add(field(n.strVal, Access.Private, n))
+    elif n.isCommand and n[0].isIdent and n[1].isAccQuoted:
+      let field = n[0]
+      ctor.fields.add(field(field.strVal, Access.Private, field))
+    elif n.isAsgn:
+      var access: Access
+      var field: NimNode
+      if n[0].isIdent:
+        field = n[0]
+        access = Access.Private
+      elif n[0].isCommand and n[0][0].isIdent and n[0][1].isAccQuoted and n[0][1][0].isIdent("*"):
+        field = n[0][0]
+        access = Access.Public
+      elif n[0].isCommand and n[0][0].isIdent and n[0][1].isAccQuoted and n[0][1][0].isIdent("+"):
+        field = n[0][0]
+        access = Access.Readable
+      else:
+        error &"Unsupported expression in self block: {n.repr}", n
+      let texpr = n[1]
+      ctor.fields.add(field(field.strVal, Access.Private, texpr))
+    elif n.isBaseCall:
+      if baseCall.isNone:
+        baseCall = some(n.parseBaseCall)
+      else:
+        error "Class definition must have only one base call.", n
+    else:
+      error &"Unsupported expression in self block: {n.repr}", n
+
+  ctor.body.add(BodySelfBlock(baseCall: baseCall))
+
+
 proc parseConstructorBody(ctorBody: NimNode, ctor: Constructor) =
   var foundSelfBlock = false
 
   for n in ctorBody:
     if n.isCall and n[0].isIdent("self"):
       foundSelfBlock = true
-      var baseCall = none(ParsedBaseCall)
-      for sub in n[1].assumeStmtList:
-        if sub.isBasecall():
-          if baseCall.isNone:
-            baseCall = some(sub.parseBaseCall)
-          else:
-            error "Class definition must have only one base call.", sub
-      ctor.body.add(BodySelfBlock(baseCall: baseCall))
+      parseSelfBlock(n[1].assumeStmtList(), ctor)
     else:
       ctor.body.add(BodyStmtNode(node: n))
 
@@ -229,7 +266,7 @@ proc parseBody(body: NimNode): Body =
 # Assembly of output procs
 # -----------------------------------------------------------------------------
 
-proc extractFields(pseudoCtorBlock: NimNode): seq[Field] =
+proc extractFields(ctor: Constructor, pseudoCtorBlock: NimNode): seq[Field] =
 
   # get procdef
   expectKind pseudoCtorBlock, nnkBlockStmt
@@ -249,19 +286,30 @@ proc extractFields(pseudoCtorBlock: NimNode): seq[Field] =
     # block. Can this lead to issues?
     return @[]
 
-  # extract fields
-  var fields = newSeq[Field]()
+  # extract field types from the typed ctor
+  var fieldTypes = initTable[string, NimNode]()
   for n in selfBlockContent.assumeStmtList:
     if n.isVariableBinding:
       for identDef in n:
         let field = identDef[0]
         let texpr = identDef[2]
-        fields.add(Field(
-          name: field.strVal,
-          access: Access.Private,
-          typ: texpr.getType,
-          rhs: toUntyped(texpr), # needed to get rid of already bound symbols
-        ))
+        # echo texpr.treeRepr
+        # echo "getType: ", texpr.getType.treeRepr
+        # echo "getTypeImpl: ", texpr.getTypeImpl.treeRepr
+        # echo "getTypeInst: ", texpr.getTypeInst.treeRepr
+        fieldTypes[field.strVal] = toUntyped(texpr.getTypeInst)
+
+  if fieldTypes.len != ctor.fields.len:
+    error &"Typed constructor has {fieldTypes.len} fields, but untyped constructor has {ctor.fields.len}"
+
+  # patch types into the untyped ctor fields
+  var fields = ctor.fields
+  for i in 0 ..< fields.len:
+    let name = fields[i].name
+    if not fieldTypes.contains(name):
+      error &"Field {name} not found in typed constructor"
+    let typ = fieldTypes[name]
+    fields[i].typ = typ
 
   return fields
 
@@ -447,7 +495,8 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
 
   # extract blocks and fields
   let body = parseBody(body)
-  let fields = extractFields(pseudoCtor)
+  let ctor = body.ctor.get(defaultConstructor())
+  let fields = extractFields(ctor, pseudoCtor)
 
   #[
   # TODO: add verification of base call usage
@@ -488,7 +537,6 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
     result.add(n)
 
   # Generate patch proc
-  let ctor = body.ctor.get(defaultConstructor())
   let patchProc = assemblePatchProc(classDef, baseSymbol, ctor, fields)
   result.add(patchProc)
 
@@ -514,6 +562,7 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
 # -----------------------------------------------------------------------------
 
 template markPublic*() {.pragma.}
+template markReadable*() {.pragma.}
 
 proc newLetStmtWithPragma*(name, value: NimNode, pragmas: openarray[NimNode] = []): NimNode {.compiletime.} =
   result = newNimNode(nnkLetSection).add(
@@ -527,6 +576,7 @@ proc newLetStmtWithPragma*(name, value: NimNode, pragmas: openarray[NimNode] = [
     )
   )
 
+#[
 proc transformSelfBlock(body: NimNode): NimNode =
   result = newBlockStmt(ident "self", newStmtList())
   for n in body:
@@ -562,6 +612,28 @@ proc transformCtorBody(body: NimNode): NimNode =
       return
     else:
       result.add(n)
+]#
+
+proc generateTypedCtorBody(ctor: Constructor): NimNode =
+  result = newStmtList()
+  for statement in ctor.body:
+    matchInstance:
+      case statement:
+      of BodySelfBlock:
+        break
+      of BodyStmtNode:
+        result.add(statement.node)
+
+  let blck = newBlockStmt(ident "self", newStmtList())
+  for field in ctor.fields:
+    let pragmas = case field.access
+      of Access.Private: newSeq[NimNode]()
+      of Access.Public: @[ident "markPublic"]
+      of Access.Readable: @[ident "markReadable"]
+    blck[1].add(newLetStmtWithPragma(ident field.name, field.rhs, pragmas))
+
+  result.add(blck)
+
 
 proc extractPseudoCtor(body: NimNode): NimNode =
   let ctor = newProc(ident "dummy")
@@ -574,7 +646,7 @@ proc extractPseudoCtor(body: NimNode): NimNode =
         for arg in ctorParsed.args:
           ctor.formalParams.add(arg)
         # transform body
-        ctor.procBody = transformCtorBody(ctorParsed.rawBody)
+        ctor.procBody = generateTypedCtorBody(ctorParsed) # transformCtorBody(ctorParsed.rawBody)
 
   result = newBlockStmt(ctor)
   echo result.repr
@@ -585,7 +657,7 @@ proc extractPseudoCtor(body: NimNode): NimNode =
 
 macro class*(definition: untyped, body: untyped): untyped =
   ## Class definition that derives from RootObj.
-  let pseudoCtor = extractPseudoCtor(body.copyNimTree()) # without copying there is an "environment misses" error...
+  let pseudoCtor = extractPseudoCtor(body) # need to copy here in case of "environment misses"?
 
   let (identDef, identBase) =
     if definition.kind == nnkInfix and definition[0].strVal == "of":
