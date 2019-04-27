@@ -1,5 +1,5 @@
 #[
-Patch call has been instantiated with wrong type
+type mismatch: got <B, OtherBase>
 ]#
 import oop_utils/standard_class
 import strformat

@@ -361,19 +361,20 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, fields: seq[Fi
   return typeSection
 
 
-template fallbackBaseCall(selfIdent: untyped, baseSymbol: untyped, baseName: string) =
-  when compiles(patch(baseSymbol(selfIdent))):
-    patch(baseSymbol(selfIdent))
+template fallbackBaseCall(patchFunc: untyped, selfIdent: untyped, baseSymbol: untyped, baseName: string) =
+  when compiles(patchFunc(baseSymbol(selfIdent))):
+    patchFunc(baseSymbol(selfIdent))
   else:
     {.error: "Class needs to have an explicit base call, " &
              "because the constructor of '" & baseName & "' requires parameters.".}
+
 
 proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructor, fields: seq[Field]): NimNode =
 
   # main proc def
   let selfIdent = ident "self"
   result = newProc(
-    publicIdent("patch"),
+    publicIdent("patch" & classDef.name),
     [newEmptyNode(), newIdentDefs(selfIdent, classDef.rawClassDef)],
   )
   for arg in ctor.args:
@@ -394,7 +395,7 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
       of BodySelfBlock:
         # base call
         for baseCall in bodyStmt.baseCall:
-          let patchCallBase = newCall(ident "patch")
+          let patchCallBase = newCall(ident "patch" & baseSymbol.strVal)
           patchCallBase.copyLineInfo(baseCall.origNode)
           patchCallBase.add(newCall(baseSymbol, selfIdent))
           for arg in baseCall.args:
@@ -402,9 +403,10 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
           result.procBody.add(patchCallBase)
         if bodyStmt.baseCall.isNone:
           if baseSymbol.strVal != "RootObj":
+            let patchFunc = ident "patch" & baseSymbol.strVal
             #result.procBody.add(getAst(fallbackBaseCall(selfIdent, baseSymbol, baseSymbol.strVal)))
             result.procBody.add(newCall(bindsym "fallbackBaseCall",
-              [selfIdent, baseSymbol, newStrLitNode(baseSymbol.strVal)]
+              [patchFunc, selfIdent, baseSymbol, newStrLitNode(baseSymbol.strVal)]
             ))
         # inits fields
         for field in fields:
@@ -426,7 +428,7 @@ proc assembleConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constru
 
   # call patch
   let patchCall = newCall(
-    ident "patch",
+    ident "patch" & classDef.name,
   )
   patchCall.add(ident "self")
   for arg in ctor.args:
