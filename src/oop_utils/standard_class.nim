@@ -6,6 +6,7 @@ import tables
 import strutils
 import sequtils
 import sugar
+import typetraits
 
 import private/utils
 import private/common
@@ -362,19 +363,39 @@ proc assembleTypeSection(classDef: ClassDef, baseSymbol: NimNode, fields: seq[Fi
 
 
 template fallbackBaseCall(selfIdent: untyped, baseSymbol: untyped, baseName: string) =
-  when compiles(patch(baseSymbol(selfIdent))):
-    patch(baseSymbol(selfIdent))
+  static:
+    echo name(baseSymbol)
+  when compiles(patch(baseSymbol, baseSymbol(selfIdent))):
+    patch(baseSymbol, baseSymbol(selfIdent))
   else:
     {.error: "Class needs to have an explicit base call, " &
              "because the constructor of '" & baseName & "' requires parameters.".}
 
+template typeCheck(instantiatedType: untyped, selfType: untyped) =
+  static:
+    echo name(type(instantiatedType))
+    echo name(type(selfType))
+  when not (instantiatedType is selfType and selfType is instantiatedType):
+    {.error: "Patch call has been instantiated with wrong type '" &
+             name(instantiatedType) &
+             "' but must be of type '" &
+             name(selfType) &
+             "'. Make sure that the arguments of the base call match exactly to its " &
+             "direct parent class.".}
+
+
 proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructor, fields: seq[Field]): NimNode =
 
   # main proc def
+  let instantiatedType = genSym(nskParam, "T")
   let selfIdent = ident "self"
   result = newProc(
     publicIdent("patch"),
-    [newEmptyNode(), newIdentDefs(selfIdent, classDef.rawClassDef)],
+    [
+      newEmptyNode(),
+      newIdentDefs(instantiatedType, newNimNode(nnkBracketExpr).add(ident "typedesc", classDef.rawClassDef)),
+      newIdentDefs(selfIdent, classDef.rawClassDef),
+    ],
   )
   for arg in ctor.args:
     result.formalParams.add(arg)
@@ -384,6 +405,11 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
     result.genericParams = newNimNode(nnkGenericParams)
     for genericParam in classDef.genericParams:
       result.genericParams.add(genericParam)
+
+  #result.procBody.add(getAst(typeCheck(instantiatedType, classDef.rawClassDef)))
+  result.procBody.add(newCall(bindsym "typeCheck",
+    [instantiatedType, classDef.rawClassDef]
+  ))
 
   # 1. ctor body (base call + var defs + init code)
   for bodyStmt in ctor.body:
@@ -396,7 +422,8 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
         for baseCall in bodyStmt.baseCall:
           let patchCallBase = newCall(ident "patch")
           patchCallBase.copyLineInfo(baseCall.origNode)
-          patchCallBase.add(newCall(baseSymbol, selfIdent))
+          patchCallBase.add(baseSymbol.toUntyped())   # needed because of https://github.com/nim-lang/Nim/issues/11125
+          patchCallBase.add(newCall(baseSymbol.toUntyped(), selfIdent))
           for arg in baseCall.args:
             patchCallBase.add(arg)
           result.procBody.add(patchCallBase)
@@ -404,7 +431,7 @@ proc assemblePatchProc(classDef: ClassDef, baseSymbol: NimNode, ctor: Constructo
           if baseSymbol.strVal != "RootObj":
             #result.procBody.add(getAst(fallbackBaseCall(selfIdent, baseSymbol, baseSymbol.strVal)))
             result.procBody.add(newCall(bindsym "fallbackBaseCall",
-              [selfIdent, baseSymbol, newStrLitNode(baseSymbol.strVal)]
+              [selfIdent, baseSymbol.toUntyped(), newStrLitNode(baseSymbol.strVal)]
             ))
         # inits fields
         for field in fields:
@@ -428,6 +455,7 @@ proc assembleConstructorBody(procDef: NimNode, classDef: ClassDef, ctor: Constru
   let patchCall = newCall(
     ident "patch",
   )
+  patchCall.add(classDef.rawClassDef)
   patchCall.add(ident "self")
   for arg in ctor.args:
     patchCall.add(arg[0])
