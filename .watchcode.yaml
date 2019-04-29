@@ -25,7 +25,8 @@ tasks:
       #- "nim -r c ./tests/standard_class/visibility_test_1.nim"
       #- "nim -r c ./tests/standard_class/accidental_upcast_error.nim"
       #- "nim -r c ./tests/standard_class/base_calls_error_1.nim"
-      - "nim -r c ./tests/standard_class/base_calls_test_1.nim"
+      #- "nim -r c ./tests/standard_class/base_calls_test_1.nim"
+      - "nim -r c ./tests/standard_class/ctor_test_2.nim"
 
       #- "nim -r c ./tests/test_basic_1.nim"
       #- "nim -r c ./tests/test_inheritance_chain.nim"

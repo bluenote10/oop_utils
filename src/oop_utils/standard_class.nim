@@ -285,7 +285,7 @@ proc extractFields(ctor: Constructor, pseudoCtorBlock: NimNode): seq[Field] =
   # get self block
   var selfBlockContent: NimNode
   proc isSelfBlock(n: NimNode): bool =
-    n.kind == nnkBlockStmt and n[0].strVal == "self"
+    n.kind == nnkBlockStmt and n[0].isIdent("self")
   for n in pseudoCtor.procBody.assumeStmtList:
     if n.isSelfBlock:
       selfBlockContent = n[1]
