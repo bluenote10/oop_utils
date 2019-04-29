@@ -285,7 +285,7 @@ proc extractFields(ctor: Constructor, pseudoCtorBlock: NimNode): seq[Field] =
   # get self block
   var selfBlockContent: NimNode
   proc isSelfBlock(n: NimNode): bool =
-    n.kind == nnkBlockStmt and n[0].isIdent("self")
+    n.kind == nnkBlockStmt and n[0].isIdentOrSym("self")
   for n in pseudoCtor.procBody.assumeStmtList:
     if n.isSelfBlock:
       selfBlockContent = n[1]
@@ -489,10 +489,11 @@ proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor): NimNode 
 macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyped): untyped =
 
   result = newStmtList()
-  echo "-----------------------------------------------------------------------"
-  echo definition.treeRepr
-  echo body.treeRepr
-  echo "-----------------------------------------------------------------------"
+  when false:
+    echo "-----------------------------------------------------------------------"
+    echo definition.treeRepr
+    echo body.treeRepr
+    echo "-----------------------------------------------------------------------"
 
   # extract infos from definition
   let classDef = parseDefinition(definition)
@@ -565,7 +566,8 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
 
   # Take a copy as a work-around for: https://github.com/nim-lang/Nim/issues/10902
   result = result.copy
-  echo result.repr
+  when defined(debugOOP):
+    echo result.repr
   # echo result.treeRepr
 
 # -----------------------------------------------------------------------------
@@ -660,7 +662,8 @@ proc extractPseudoCtor(body: NimNode): NimNode =
         ctor.procBody = generateTypedCtorBody(ctorParsed) # transformCtorBody(ctorParsed.rawBody)
 
   result = newBlockStmt(ctor)
-  echo result.repr
+  when defined(debugOOP):
+    echo result.repr
 
 # -----------------------------------------------------------------------------
 # Public macros

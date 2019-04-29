@@ -364,12 +364,13 @@ proc overloadAnalysis(baseProcs: BaseMethods, exportedProcs: seq[ExportedProc]):
 
   result.isFullyOverloaded = (result.remainingBaseProcs.len == 0)
 
-  echo "Overload analysis"
-  echo "  isAbstract:         ", result.isAbstract
-  echo "  isFullyOverloaded:  ", result.isFullyOverloaded
-  echo "  newProcs:           ", result.newProcs.mapIt(it.name)
-  echo "  overloadedProcs:    ", result.overloadedProcs.mapIt(it.name)
-  echo "  remainingBaseProcs: ", result.remainingBaseProcs
+  when defined(debugOOP):
+    echo "Overload analysis"
+    echo "  isAbstract:         ", result.isAbstract
+    echo "  isFullyOverloaded:  ", result.isFullyOverloaded
+    echo "  newProcs:           ", result.newProcs.mapIt(it.name)
+    echo "  overloadedProcs:    ", result.overloadedProcs.mapIt(it.name)
+    echo "  remainingBaseProcs: ", result.remainingBaseProcs
 
 # -----------------------------------------------------------------------------
 # Assembly of output procs
@@ -688,10 +689,11 @@ proc preprocessBody(body: NimNode) =
 macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
   result = newStmtList()
-  echo "-----------------------------------------------------------------------"
-  echo definition.treeRepr
-  echo body.treeRepr
-  echo "-----------------------------------------------------------------------"
+  when false:
+    echo "-----------------------------------------------------------------------"
+    echo definition.treeRepr
+    echo body.treeRepr
+    echo "-----------------------------------------------------------------------"
 
   # extract infos from definition
   let classDef = parseDefinition(definition)
@@ -743,8 +745,9 @@ macro classImpl(definition: untyped, base: typed, body: untyped): untyped =
 
   # Take a copy as a work-around for: https://github.com/nim-lang/Nim/issues/10902
   result = result.copy
-  echo result.repr
-  #echo result.treeRepr
+  when defined(debugOOP):
+    echo result.repr
+    #echo result.treeRepr
 
 
 # -----------------------------------------------------------------------------

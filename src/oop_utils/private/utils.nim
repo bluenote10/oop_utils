@@ -39,6 +39,8 @@ proc isIdent*(n: NimNode): bool =
 proc isIdent*(n: NimNode, s: string): bool =
   n.kind == nnkIdent and n.strVal == s
 
+proc isIdentOrSym*(n: NimNode, s: string): bool =
+  (n.kind == nnkIdent or n.kind == nnkSym) and n.strVal == s
 
 proc procBody*(n: NimNode): NimNode =
   expectKinds n, {nnkProcDef, nnkMethodDef, nnkTemplateDef, nnkLambda}
