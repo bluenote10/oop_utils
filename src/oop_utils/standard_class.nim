@@ -26,6 +26,9 @@ type
     genericParams: NimNode
     #identBaseClass: NimNode
 
+proc isGeneric(classDef: ClassDef): bool =
+  classDef.genericParams.len > 0
+
 proc parseClassName(classDef: ClassDef, n: NimNode) =
   ## Helper function to split the class ident from generic params
   if n.kind == nnkIdent:
@@ -123,6 +126,7 @@ proc parseSelfBlock(body: NimNode, ctor: Constructor) =
     if n.isIdent:
       ctor.fields.add(field(n.strVal, Access.Private, n))
     elif n.isCommand and n[0].isIdent and n[1].isAccQuoted:
+      # TODO add handling of explict types here
       let field = n[0]
       ctor.fields.add(field(field.strVal, Access.Private, field))
     elif n.isAsgn:
@@ -141,11 +145,19 @@ proc parseSelfBlock(body: NimNode, ctor: Constructor) =
         error &"Unsupported expression in self block: {n.repr}", n
       let texpr = n[1]
       ctor.fields.add(field(field.strVal, access, texpr))
+    elif n.isCall() and n[1].kind == nnkStmtList and n[1][0].isAsgn:
+      let field = n[0]
+      let typ = n[1][0][0]
+      let texpr = n[1][0][1]
+      let access = Access.Public  # TODO: add handling
+      ctor.fields.add(field(field.strVal, access, texpr, typ))
+
     elif n.isBaseCall:
       if baseCall.isNone:
         baseCall = some(n.parseBaseCall)
       else:
         error "Class definition must have only one base call.", n
+
     else:
       error &"Unsupported expression in self block: {n.repr}", n
 
@@ -275,7 +287,7 @@ proc parseBody(body: NimNode): Body =
 # Assembly of output procs
 # -----------------------------------------------------------------------------
 
-proc extractFields(ctor: Constructor, pseudoCtorBlock: NimNode): seq[Field] =
+proc extractFields(ctor: Constructor, pseudoCtorBlock: NimNode, isGeneric: bool): seq[Field] =
 
   # get procdef
   expectKind pseudoCtorBlock, nnkBlockStmt
@@ -302,23 +314,25 @@ proc extractFields(ctor: Constructor, pseudoCtorBlock: NimNode): seq[Field] =
       for identDef in n:
         let field = identDef[0]
         let texpr = identDef[2]
-        # echo texpr.treeRepr
-        # echo "getType: ", texpr.getType.treeRepr
-        # echo "getTypeImpl: ", texpr.getTypeImpl.treeRepr
-        # echo "getTypeInst: ", texpr.getTypeInst.treeRepr
-        fieldTypes[field.strVal] = toUntyped(texpr.getTypeInst)
+        #echo texpr.treeRepr
+        #echo "getType: ", texpr.getType.treeRepr
+        #echo "getTypeImpl: ", texpr.getTypeImpl.treeRepr
+        #echo "getTypeInst: ", texpr.getTypeInst.treeRepr
+        if not isGeneric:
+          fieldTypes[field.strVal] = toUntyped(texpr.getTypeInst)
 
-  if fieldTypes.len != ctor.fields.len:
-    error &"Typed constructor has {fieldTypes.len} fields, but untyped constructor has {ctor.fields.len}"
+  #if fieldTypes.len = ctor.fields.len:
+  #  error &"Typed constructor has {fieldTypes.len} fields, but untyped constructor has {ctor.fields.len}"
 
   # patch types into the untyped ctor fields
   var fields = ctor.fields
   for i in 0 ..< fields.len:
-    let name = fields[i].name
-    if not fieldTypes.contains(name):
-      error &"Field {name} not found in typed constructor"
-    let typ = fieldTypes[name]
-    fields[i].typ = typ
+    if fields[i].typ.isNil:
+      let name = fields[i].name
+      if not fieldTypes.contains(name):
+        error &"Type of field '{name}' cannot be inferred, needs to be specified explicitly."
+      let typ = fieldTypes[name]
+      fields[i].typ = typ
 
   return fields
 
@@ -508,7 +522,7 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
   # extract blocks and fields
   let body = parseBody(body)
   let ctor = body.ctor.get(defaultConstructor())
-  let fields = extractFields(ctor, pseudoCtor)
+  let fields = extractFields(ctor, pseudoCtor, isGeneric=classDef.isGeneric)
 
   #[
   # TODO: add verification of base call usage
@@ -536,14 +550,18 @@ macro classImpl(definition: untyped, base: typed, pseudoCtor: typed, body: untyp
   for f in body.funcs:
     if f.node.kind != nnkTemplateDef: # templates cannot be forward declared
       let n = f.node.copyNimTree()
-      n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
+      n.formalParams.insert(1, newIdentDefs(ident "self", classDef.rawClassDef))
+      if classDef.isGeneric:
+        n.genericParams = classDef.genericParams.copy()
       n.procBody = newEmptyNode()
       result.add(n)
 
   # Generate funcs
   for f in body.funcs:
     let n = f.node.copyNimTree()
-    n.formalParams.insert(1, newIdentDefs(ident "self", classDef.identClass))
+    n.formalParams.insert(1, newIdentDefs(ident "self", classDef.rawClassDef))
+    if classDef.isGeneric:
+      n.genericParams = classDef.genericParams.copy()
     if n.kind == nnkMethodDef and n.procBody.kind == nnkEmpty:
       n.procBody = generateUnimplementedBody(n.procName)
     result.add(n)
@@ -648,7 +666,7 @@ proc generateTypedCtorBody(ctor: Constructor): NimNode =
   result.add(blck)
 
 
-proc extractPseudoCtor(body: NimNode): NimNode =
+proc extractPseudoCtor(classDef: ClassDef, body: NimNode): NimNode =
   let ctor = newProc(ident "dummy")
   ctor.pragmas = newNimNode(nnkPragma).add(ident "used")
   for n in body:
@@ -658,6 +676,9 @@ proc extractPseudoCtor(body: NimNode): NimNode =
         ctor.formalParams = newNimNode(nnkFormalParams).add(newEmptyNode())
         for arg in ctorParsed.args:
           ctor.formalParams.add(arg)
+        # inject generic params
+        if classDef.genericParams.kind != nnkEmpty:
+          ctor.genericParams = classDef.genericParams
         # transform body
         ctor.procBody = generateTypedCtorBody(ctorParsed) # transformCtorBody(ctorParsed.rawBody)
 
@@ -671,13 +692,17 @@ proc extractPseudoCtor(body: NimNode): NimNode =
 
 macro class*(definition: untyped, body: untyped): untyped =
   ## Class definition that derives from RootObj.
-  let pseudoCtor = extractPseudoCtor(body) # need to copy here in case of "environment misses"?
 
   let (identDef, identBase) =
     if definition.kind == nnkInfix and definition[0].strVal == "of":
       (definition[1], definition[2])
     else:
       (definition, getType(typedesc[RootObj]))
+
+  # extract infos from definition -- TODO pass in to classImpl so that we don't compute it twice
+  let classDef = parseDefinition(identDef)
+
+  let pseudoCtor = extractPseudoCtor(classDef, body) # need to copy here in case of "environment misses"?
 
   result = newCall(
     bindSym "classImpl",
