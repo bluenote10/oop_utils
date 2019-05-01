@@ -149,7 +149,7 @@ proc parseSelfBlock(body: NimNode, ctor: Constructor) =
       let field = n[0]
       let typ = n[1][0][0]
       let texpr = n[1][0][1]
-      let access = Access.Public  # TODO: add handling
+      let access = Access.Private  # TODO: add handling
       ctor.fields.add(field(field.strVal, access, texpr, typ))
 
     elif n.isBaseCall:

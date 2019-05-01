@@ -30,6 +30,13 @@ macro toNimNode(body: untyped): NimNode =
   result = body.copy
   echo result.treerepr
 
+macro self(body: untyped): untyped =
+  ## That also doesn't work. Probably because the argument to quote is `typed`
+  ## and the body will not pass the semchecker...
+  result = newCall(ident "quote", [body, newStrLitNode("@@")])
+  echo result.repr
+
+
 proc validateFields(expected: seq[Field], body: NimNode) =
   var ctor = Constructor()
   parseSelfBlock(body.assumeStmtList(), ctor)
@@ -49,19 +56,31 @@ proc validateFields(expected: seq[Field], body: NimNode) =
     check actual[i].typ == expected[i].typ
 
 
-macro self(body: untyped): untyped =
-  ## That also doesn't work. Probably because the argument to quote is `typed`
-  ## and the body will not pass the semchecker...
-  result = newCall(ident "quote", [body, newStrLitNode("@@")])
-  echo result.repr
-
-
 static:
+  # ---------------------------------------------------------------------------
+  # Single field
+  # ---------------------------------------------------------------------------
   validateFields(@[
-      field("x", Access.Private, ident "x"),
+      field("x", Access.Private, rhs = ident "x", typ = nil),
   ]):
     quote:
       x
+
+  validateFields(@[
+      field("x", Access.Private, rhs = ident "xx", typ = nil),
+  ]):
+    quote:
+      x = xx
+
+  validateFields(@[
+      field("x", Access.Private, rhs = ident "xx", typ = bindSym "int"),
+  ]):
+    quote:
+      x: int = xx
+
+  # ---------------------------------------------------------------------------
+  # Multiple fields
+  # ---------------------------------------------------------------------------
 
   validateFields(@[
       field("x", Access.Private, ident "x"),
@@ -72,6 +91,7 @@ static:
       y
 
   #[
+  # Fails because of https://github.com/nim-lang/Nim/issues/11151
   validateFields(@[
       field("a", Access.Private, ident "a"),
       field("b", Access.Readable, ident "b"),
