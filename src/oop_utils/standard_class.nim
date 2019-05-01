@@ -480,7 +480,7 @@ proc assembleGenericConstructor(classDef: ClassDef, ctor: Constructor): NimNode 
       genSym(nskParam, "T"),
       newNimNode(nnkBracketExpr).add(
         ident "typedesc",
-        classDef.identClass,
+        classDef.rawClassDef,
       )
     )
   )
