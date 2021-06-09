@@ -1,4 +1,4 @@
-# oop_utils [![Build Status](https://travis-ci.org/bluenote10/oop_utils.svg?branch=master)](https://travis-ci.org/bluenote10/oop_utils) [![license](https://img.shields.io/github/license/mashape/apistatus.svg)](LICENSE) <a href="https://github.com/yglukhov/nimble-tag"><img src="https://raw.githubusercontent.com/yglukhov/nimble-tag/master/nimble.png" height="23" ></a>
+# oop_utils [![Build Status](https://github.com/bluenote10/oop_utils/workflows/ci/badge.svg)](https://github.com/bluenote10/oop_utils/actions?query=workflow%3Aci) [![license](https://img.shields.io/github/license/mashape/apistatus.svg)](LICENSE) <a href="https://github.com/yglukhov/nimble-tag"><img src="https://raw.githubusercontent.com/yglukhov/nimble-tag/master/nimble.png" height="23" ></a>
 
 oop_utils provides macros that allow to easily create OOP class hierarchies.
 
